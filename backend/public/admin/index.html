@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ServiceConnect Admin Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <div class="auth-panel" id="authPanel">
+    <div class="auth-card">
+      <h1>Admin Access</h1>
+      <p>Paste a valid admin JWT to continue.</p>
+      <label for="tokenInput">JWT Token</label>
+      <textarea id="tokenInput" rows="5" placeholder="eyJhbGciOi..."></textarea>
+      <button id="saveTokenBtn">Continue</button>
+      <p class="error-text" id="authError"></p>
+    </div>
+  </div>
+
+  <div class="app-shell hidden" id="appShell">
+    <aside class="sidebar">
+      <div>
+        <h2>ServiceConnect</h2>
+        <p class="subtle">Admin Dashboard</p>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-link active" data-page="users">Manage Users</button>
+        <button class="nav-link" data-page="services">Manage Services</button>
+      </nav>
+
+      <button class="logout-btn" id="logoutBtn">Logout</button>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <h1 id="pageTitle">Manage Users</h1>
+        <button class="refresh-btn" id="refreshBtn">Refresh</button>
+      </header>
+
+      <section class="cards-grid" id="reportCards"></section>
+
+      <section class="page active" id="usersPage">
+        <div class="toolbar">
+          <input id="userSearch" placeholder="Search name/email/phone" />
+          <select id="userRoleFilter">
+            <option value="">All roles</option>
+            <option value="user">User</option>
+            <option value="provider">Provider</option>
+            <option value="admin">Admin</option>
+          </select>
+          <select id="userStatusFilter">
+            <option value="">All status</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+          </select>
+          <select id="userApprovedFilter">
+            <option value="">All approval</option>
+            <option value="true">Approved</option>
+            <option value="false">Pending/Rejected</option>
+          </select>
+          <button id="applyUserFilters">Apply</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Account Status</th>
+                <th>Is Approved</th>
+                <th>Created At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="page" id="servicesPage">
+        <div class="toolbar">
+          <input id="serviceSearch" placeholder="Search service/description" />
+          <input id="serviceCategoryFilter" placeholder="Category" />
+          <input id="serviceProviderFilter" placeholder="Provider ID" />
+          <select id="serviceStatusFilter">
+            <option value="">All status</option>
+            <option value="active">Active</option>
+            <option value="removed">Removed</option>
+            <option value="available">Available</option>
+            <option value="unavailable">Unavailable</option>
+          </select>
+          <button id="applyServiceFilters">Apply</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Service Name</th>
+                <th>Provider Name</th>
+                <th>Provider Phone</th>
+                <th>Provider Address</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Created At</th>
+                <th>Availability Status</th>
+                <th>Images Count</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="servicesTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="error-text" id="appError"></p>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal hidden" id="userModal">
+    <div class="modal-card">
+      <h3>User Details</h3>
+      <pre id="userDetailsContent"></pre>
+      <button id="closeUserModal">Close</button>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

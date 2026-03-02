@@ -1,0 +1,560 @@
+const mongoose = require("mongoose");
+const User = require("../models/User");
+const Booking = require("../models/Booking");
+const Service = require("../models/Service");
+const Review = require("../models/Review");
+const asyncHandler = require("../utils/asyncHandler");
+
+const escapeRegex = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const applyQueryModifiers = (query, { sort, page, limit } = {}) => {
+  let result = query;
+
+  if (sort && typeof result.sort === "function") {
+    result = result.sort(sort);
+  }
+
+  const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+  const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  const skip = (parsedPage - 1) * parsedLimit;
+
+  if (typeof result.skip === "function") {
+    result = result.skip(skip);
+  }
+  if (typeof result.limit === "function") {
+    result = result.limit(parsedLimit);
+  }
+
+  return { query: result, parsedPage, parsedLimit };
+};
+
+exports.getAllUsers = asyncHandler(async (req, res) => {
+  const { search = "", role, status, approved, page, limit } = req.query;
+  const shouldPaginate = page !== undefined || limit !== undefined;
+
+  const filter = {};
+
+  if (search.trim()) {
+    const regex = new RegExp(escapeRegex(search.trim()), "i");
+    filter.$or = [{ name: regex }, { email: regex }, { phone: regex }];
+  }
+
+  if (typeof role === "string" && ["user", "provider", "admin"].includes(role)) {
+    filter.role = role;
+  }
+
+  if (typeof status === "string" && ["active", "suspended"].includes(status)) {
+    filter.accountStatus = status;
+  }
+
+  if (typeof approved === "string" && ["true", "false"].includes(approved.toLowerCase())) {
+    filter.isApproved = approved.toLowerCase() === "true";
+  }
+
+  let usersQuery = User.find(filter).select("-password");
+  const { query, parsedPage, parsedLimit } = applyQueryModifiers(usersQuery, {
+    sort: { createdAt: -1 },
+    page,
+    limit
+  });
+  usersQuery = query;
+
+  const users = await usersQuery;
+  const total = shouldPaginate
+    ? await User.countDocuments(filter)
+    : (Array.isArray(users) ? users.length : 0);
+
+  res.json({
+    success: true,
+    data: users,
+    pagination: {
+      page: parsedPage,
+      limit: parsedLimit,
+      total,
+      totalPages: Math.max(Math.ceil(total / parsedLimit), 1)
+    }
+  });
+});
+
+exports.getUserDetailsAdmin = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ success: false, message: "Invalid user ID" });
+  }
+
+  const user = await User.findById(id).select("-password");
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const [bookingsCount, reviewsCount, servicesCount] = await Promise.all([
+    Booking.countDocuments({
+      $or: [{ userId: id }, { providerId: id }]
+    }),
+    Review.countDocuments({ userId: id }),
+    Service.countDocuments({ providerId: id })
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      ...user.toObject(),
+      metrics: {
+        bookingsCount,
+        reviewsCount,
+        servicesCount
+      }
+    }
+  });
+});
+
+exports.updateUserRole = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  user.role = req.body.role;
+  await user.save();
+
+  res.json({
+    success: true,
+    data: user
+  });
+});
+
+exports.getDashboardStats = asyncHandler(async (req, res) => {
+  const [
+    totalUsers,
+    totalProviders,
+    pendingProviders,
+    suspendedUsers,
+    totalServices,
+    removedServices
+  ] = await Promise.all([
+    User.countDocuments(),
+    User.countDocuments({ role: "provider" }),
+    User.countDocuments({ role: "provider", isApproved: false }),
+    User.countDocuments({ accountStatus: "suspended" }),
+    Service.countDocuments({ moderationStatus: { $ne: "removed" } }),
+    Service.countDocuments({ moderationStatus: "removed" })
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      totalUsers,
+      totalProviders,
+      pendingProviders,
+      suspendedUsers,
+      totalServices,
+      removedServices
+    }
+  });
+});
+
+exports.updateUserStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { accountStatus } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid user ID"
+    });
+  }
+
+  if (!["active", "suspended"].includes(accountStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: "accountStatus must be either 'active' or 'suspended'"
+    });
+  }
+
+  const user = await User.findById(id).select("-password");
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found"
+    });
+  }
+
+  user.accountStatus = accountStatus;
+  await user.save();
+
+  res.json({
+    success: true,
+    data: user
+  });
+});
+
+exports.deleteUser = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const softDelete = String(req.query.softDelete || "false").toLowerCase() === "true";
+  const hardDelete = String(req.query.hardDelete || "false").toLowerCase() === "true";
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid user ID"
+    });
+  }
+
+  if (req.user && req.user.id === id) {
+    return res.status(400).json({
+      success: false,
+      message: "Admins cannot delete their own account"
+    });
+  }
+
+  const user = await User.findById(id);
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found"
+    });
+  }
+
+  if (softDelete && !hardDelete) {
+    user.accountStatus = "suspended";
+    if (typeof user.save === "function") {
+      await user.save();
+    } else {
+      await User.updateOne({ _id: id }, { $set: { accountStatus: "suspended" } });
+    }
+
+    return res.json({
+      success: true,
+      message: "User suspended successfully"
+    });
+  }
+
+  await User.findByIdAndDelete(id);
+
+  return res.json({
+    success: true,
+    message: "User deleted successfully"
+  });
+});
+
+exports.getPendingProviders = asyncHandler(async (req, res) => {
+  const pendingProviders = await User.find({
+    role: "provider",
+    isApproved: false
+  }).select("-password");
+
+  res.json({
+    success: true,
+    data: pendingProviders
+  });
+});
+
+exports.getAllProviders = asyncHandler(async (req, res) => {
+  const providers = await User.find({ role: "provider" })
+    .select("-password")
+    .sort({ createdAt: -1 });
+
+  res.json({
+    success: true,
+    data: providers
+  });
+});
+
+exports.updateProviderApprovalStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { decision, isApproved, accountStatus, approvalStatus } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid provider ID"
+    });
+  }
+
+  const hasDecision = typeof decision === "string";
+  const hasExplicitApproval = typeof isApproved === "boolean";
+  if (!hasDecision && !hasExplicitApproval) {
+    return res.status(400).json({
+      success: false,
+      message: "Provide either decision ('approve'|'reject') or isApproved (boolean)"
+    });
+  }
+
+  if (hasDecision && !["approve", "reject"].includes(decision)) {
+    return res.status(400).json({
+      success: false,
+      message: "decision must be either 'approve' or 'reject'"
+    });
+  }
+
+  const provider = await User.findById(id).select("-password");
+
+  if (!provider || provider.role !== "provider") {
+    return res.status(404).json({
+      success: false,
+      message: "Provider not found"
+    });
+  }
+
+  const approvedFromDecision = hasDecision ? decision === "approve" : null;
+  const nextIsApproved = hasExplicitApproval ? isApproved : approvedFromDecision;
+
+  provider.isApproved = nextIsApproved;
+  const normalizedApprovalStatus =
+    typeof approvalStatus === "string" ? approvalStatus.trim().toLowerCase() : "";
+  if (["pending", "approved", "rejected"].includes(normalizedApprovalStatus)) {
+    provider.approvalStatus = normalizedApprovalStatus;
+  } else if (provider.isApproved) {
+    provider.approvalStatus = "approved";
+  } else if (hasDecision || hasExplicitApproval) {
+    provider.approvalStatus = "rejected";
+  }
+
+  if (typeof accountStatus === "string" && ["active", "suspended"].includes(accountStatus)) {
+    provider.accountStatus = accountStatus;
+  } else if (provider.isApproved && provider.accountStatus !== "active") {
+    provider.accountStatus = "active";
+  }
+
+  await provider.save();
+
+  res.json({
+    success: true,
+    message: provider.isApproved ? "Provider approved successfully" : "Provider rejected successfully",
+    data: provider
+  });
+});
+
+exports.approveProvider = asyncHandler(async (req, res) => {
+  req.body = {
+    ...req.body,
+    decision: "approve",
+    isApproved: true,
+    approvalStatus: "approved",
+    accountStatus: req.body.accountStatus || "active"
+  };
+
+  return exports.updateProviderApprovalStatus(req, res);
+});
+
+exports.rejectProvider = asyncHandler(async (req, res) => {
+  req.body = {
+    ...req.body,
+    decision: "reject",
+    isApproved: false,
+    approvalStatus: "rejected",
+    accountStatus: req.body.accountStatus || "suspended"
+  };
+
+  return exports.updateProviderApprovalStatus(req, res);
+});
+
+exports.updateProviderAccountStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { accountStatus } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid provider ID"
+    });
+  }
+
+  if (!["active", "suspended"].includes(accountStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: "accountStatus must be either 'active' or 'suspended'"
+    });
+  }
+
+  const provider = await User.findById(id).select("-password");
+
+  if (!provider || provider.role !== "provider") {
+    return res.status(404).json({
+      success: false,
+      message: "Provider not found"
+    });
+  }
+
+  provider.accountStatus = accountStatus;
+  await provider.save();
+
+  res.json({
+    success: true,
+    data: provider
+  });
+});
+
+exports.getAllServicesAdmin = asyncHandler(async (req, res) => {
+  const {
+    category,
+    providerId,
+    status,
+    search = "",
+    page,
+    limit
+  } = req.query;
+  const shouldPaginate = page !== undefined || limit !== undefined;
+
+  const filter = {};
+
+  if (typeof category === "string" && category.trim()) {
+    filter.category = category.trim();
+  }
+
+  if (typeof providerId === "string" && mongoose.Types.ObjectId.isValid(providerId)) {
+    filter.providerId = providerId;
+  }
+
+  if (typeof status === "string" && ["active", "removed", "available", "unavailable"].includes(status)) {
+    if (["active", "removed"].includes(status)) {
+      filter.moderationStatus = status;
+    } else {
+      filter.availabilityStatus = status === "available" ? "Available" : "Unavailable";
+    }
+  }
+
+  if (search.trim()) {
+    filter.$or = [
+      { serviceName: new RegExp(escapeRegex(search.trim()), "i") },
+      { description: new RegExp(escapeRegex(search.trim()), "i") }
+    ];
+  }
+
+  let servicesQuery = Service.find(filter);
+  if (typeof servicesQuery.populate === "function") {
+    servicesQuery = servicesQuery.populate("providerId", "name phone providerAddress");
+  }
+
+  const { query, parsedPage, parsedLimit } = applyQueryModifiers(servicesQuery, {
+    sort: { createdAt: -1 },
+    page,
+    limit
+  });
+  servicesQuery = query;
+
+  const services = await servicesQuery;
+  const total = shouldPaginate
+    ? await Service.countDocuments(filter)
+    : (Array.isArray(services) ? services.length : 0);
+
+  const mappedServices = Array.isArray(services)
+    ? services.map((service) => ({
+      ...service.toObject?.() || service,
+      ...(Array.isArray(service.images) ? { imagesCount: service.images.length } : {})
+    }))
+    : services;
+
+  res.json({
+    success: true,
+    data: mappedServices,
+    pagination: {
+      page: parsedPage,
+      limit: parsedLimit,
+      total,
+      totalPages: Math.max(Math.ceil(total / parsedLimit), 1)
+    }
+  });
+});
+
+exports.updateServiceAdmin = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid service ID"
+    });
+  }
+
+  const service = await Service.findById(id);
+  if (!service) {
+    return res.status(404).json({
+      success: false,
+      message: "Service not found"
+    });
+  }
+
+  const allowedFields = [
+    "serviceName",
+    "category",
+    "description",
+    "price",
+    "availabilityStatus",
+    "moderationStatus"
+  ];
+
+  allowedFields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+      service[field] = req.body[field];
+    }
+  });
+
+  if (service.moderationStatus === "removed") {
+    service.removedAt = service.removedAt || new Date();
+    service.removedBy = req.user?.id || null;
+  }
+
+  await service.save();
+
+  res.json({
+    success: true,
+    data: service
+  });
+});
+
+exports.deleteServiceAdmin = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const hardDelete = String(req.query.hardDelete || "false").toLowerCase() === "true";
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid service ID"
+    });
+  }
+
+  const service = await Service.findById(id);
+  if (!service) {
+    return res.status(404).json({
+      success: false,
+      message: "Service not found"
+    });
+  }
+
+  if (!hardDelete && typeof service.save === "function") {
+    service.moderationStatus = "removed";
+    service.removedAt = new Date();
+    service.removedBy = req.user?.id || null;
+    await service.save();
+
+    return res.json({
+      success: true,
+      message: "Service removed successfully",
+      data: service
+    });
+  }
+
+  const relatedBookings = await Booking.find({ serviceId: id }).select("_id");
+  const bookingIds = relatedBookings.map((booking) => booking._id);
+
+  await Promise.all([
+    Review.deleteMany({
+      $or: [
+        { serviceId: id },
+        ...(bookingIds.length ? [{ bookingId: { $in: bookingIds } }] : [])
+      ]
+    }),
+    Booking.deleteMany({ serviceId: id }),
+    Service.findByIdAndDelete(id)
+  ]);
+
+  return res.json({
+    success: true,
+    message: "Service and related records deleted successfully"
+  });
+});

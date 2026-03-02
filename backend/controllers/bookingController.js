@@ -1,0 +1,221 @@
+const mongoose = require("mongoose");
+const Service = require("../models/Service");
+const Booking = require("../models/Booking");
+const asyncHandler = require("../utils/asyncHandler");
+
+exports.createBooking = asyncHandler(async (req, res) => {
+  const { serviceId, bookingDate } = req.body;
+
+  if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
+    const error = new Error("Valid serviceId is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Accept missing bookingDate from older clients and default to now.
+  const parsedDate = bookingDate ? new Date(bookingDate) : new Date();
+  if (Number.isNaN(parsedDate.getTime())) {
+    const error = new Error("Invalid bookingDate");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const service = await Service.findById(serviceId);
+
+  if (!service) {
+    const error = new Error("Service not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const booking = await Booking.create({
+    serviceId: service._id,
+    providerId: service.providerId,
+    userId: req.user.id,
+    bookingDate: parsedDate,
+    status: "Pending"
+  });
+
+  res.status(201).json({
+    success: true,
+    data: booking
+  });
+});
+
+exports.getUserBookings = asyncHandler(async (req, res) => {
+  const bookings = await Booking.find({ userId: req.user.id }).populate("serviceId");
+
+  res.json({
+    success: true,
+    data: bookings
+  });
+});
+
+exports.getProviderBookings = asyncHandler(async (req, res) => {
+  const bookings = await Booking.find({ providerId: req.user.id })
+    .populate("serviceId", "serviceName category price")
+    .populate("userId", "name email phone");
+
+  res.json({
+    success: true,
+    data: bookings
+  });
+});
+
+exports.getBookingById = asyncHandler(async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    const error = new Error("Invalid booking id");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const booking = await Booking.findById(req.params.id)
+    .populate("serviceId")
+    .populate("userId", "name email phone")
+    .populate("providerId", "name email providerAddress");
+
+  if (!booking) {
+    const error = new Error("Booking not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isOwnerUser = booking.userId?._id?.toString() === req.user.id;
+  const isOwnerProvider = booking.providerId?._id?.toString() === req.user.id;
+
+  if (!isOwnerUser && !isOwnerProvider) {
+    const error = new Error("Access denied");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  res.json({
+    success: true,
+    data: booking
+  });
+});
+
+exports.updateBookingStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+
+  if (!status) {
+    const error = new Error("Status is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const allowedStatuses = ["Pending", "Accepted", "Rejected", "Completed"];
+  if (!allowedStatuses.includes(status)) {
+    const error = new Error("Invalid status value");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    const error = new Error("Invalid booking id");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    const error = new Error("Booking not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  booking.status = status;
+  await booking.save();
+
+  res.json({
+    success: true,
+    data: booking
+  });
+});
+
+exports.getMyBookings = asyncHandler(async (req, res) => {
+  if (req.user.role === "user") {
+    return exports.getUserBookings(req, res);
+  }
+
+  if (req.user.role === "provider") {
+    return exports.getProviderBookings(req, res);
+  }
+
+  const error = new Error("No booking view available for this role");
+  error.statusCode = 403;
+  throw error;
+});
+
+// Get User Booking History
+exports.getUserBookings = asyncHandler(async (req, res) => {
+  const bookings = await Booking.find({
+    userId: req.user.id
+  })
+    .populate("serviceId", "serviceName price")
+    .populate("providerId", "name email providerAddress");
+
+  res.json({
+    success: true,
+    data: bookings
+  });
+});
+
+// Cancel Booking (User only if Pending)
+exports.cancelBooking = asyncHandler(async (req, res) => {
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    const error = new Error("Booking not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (booking.status !== "Pending") {
+    const error = new Error("Cannot cancel this booking");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  booking.status = "Cancelled";
+  await booking.save();
+
+  res.json({
+    success: true,
+    data: booking
+  });
+});
+
+// Delete booking (User/Provider owner)
+exports.deleteBooking = asyncHandler(async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    const error = new Error("Invalid booking id");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    const error = new Error("Booking not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isOwnerUser = booking.userId?.toString() === req.user.id;
+  const isOwnerProvider = booking.providerId?.toString() === req.user.id;
+
+  if (!isOwnerUser && !isOwnerProvider) {
+    const error = new Error("Access denied");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  await booking.deleteOne();
+
+  res.json({
+    success: true,
+    message: "Booking deleted successfully"
+  });
+});
