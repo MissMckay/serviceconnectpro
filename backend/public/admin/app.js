@@ -110,6 +110,8 @@ const switchPage = (page) => {
   pageTitle.textContent = page === "users" ? "Manage Users" : "Manage Services";
 };
 
+const roleSelectId = (userId) => `role-select-${userId}`;
+
 const renderUsers = (users = []) => {
   currentUsers = users;
   usersTableBody.innerHTML = users.map((user) => `
@@ -131,6 +133,12 @@ const renderUsers = (users = []) => {
       <td>${formatDate(user.createdAt)}</td>
       <td>
         <div class="actions">
+          <select id="${roleSelectId(user._id)}" class="btn-sm btn-muted" aria-label="Select role for ${user.email || user.name || "user"}">
+            <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
+            <option value="provider" ${user.role === "provider" ? "selected" : ""}>Provider</option>
+            <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+          </select>
+          <button class="btn-sm btn-primary" data-action="update-role" data-id="${user._id}">Update Role</button>
           <button class="btn-sm btn-primary" data-action="suspend-user" data-id="${user._id}">Suspend</button>
           <button class="btn-sm btn-primary" data-action="activate-user" data-id="${user._id}">Activate</button>
           ${user.role === "provider" ? `<button class="btn-sm btn-muted" data-action="approve-provider" data-id="${user._id}">Approve Provider</button>` : ""}
@@ -254,6 +262,22 @@ usersTableBody.addEventListener("click", async (event) => {
       await apiRequest(`/users/${id}/status`, {
         method: "PUT",
         body: JSON.stringify({ accountStatus: "active" })
+      });
+    });
+  }
+
+  if (action === "update-role") {
+    const roleElement = document.getElementById(roleSelectId(id));
+    const role = roleElement?.value;
+    if (!role) {
+      showError("Select a valid role first.");
+      return;
+    }
+
+    return handleAction("Role updated", async () => {
+      await apiRequest(`/users/${id}/role`, {
+        method: "PUT",
+        body: JSON.stringify({ role })
       });
     });
   }

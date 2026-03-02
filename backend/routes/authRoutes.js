@@ -22,7 +22,8 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ message: "name, email and password are required" });
     }
 
-    const allowedRoles = new Set(["user", "provider", "admin"]);
+    // Public signup is limited to user/provider. Admin must be assigned by an existing admin.
+    const allowedRoles = new Set(["user", "provider"]);
     if (role && !allowedRoles.has(role)) {
       return res.status(400).json({ message: "Invalid role" });
     }

@@ -3,30 +3,108 @@ const Service = require("../models/Service");
 const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 
+const parseMaybeJson = (value) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (_) {
+      return value;
+    }
+  }
+  return value;
+};
+
+const IMAGE_FIELD_NAMES = [
+  "images",
+  "image",
+  "imageUrl",
+  "imageUrls",
+  "photo",
+  "photos",
+  "photoUrls",
+  "serviceImages"
+];
+
+const isImageObject = (value) =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      ("imageUrl" in value || "url" in value || "caption" in value)
+  );
+
+const objectValuesInOrder = (value) => {
+  const keys = Object.keys(value);
+  const numericKeys = keys.filter((key) => /^\d+$/.test(key));
+
+  if (numericKeys.length === keys.length) {
+    return numericKeys
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => value[key]);
+  }
+
+  return Object.values(value);
+};
+
+const getImagesFromBody = (body = {}) => {
+  const candidates = IMAGE_FIELD_NAMES
+    .filter((fieldName) => Object.prototype.hasOwnProperty.call(body, fieldName))
+    .map((fieldName) => parseMaybeJson(body[fieldName]))
+    .filter((value) => value !== undefined && value !== null);
+
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  return candidates;
+};
+
+const isMultipartRequest = (req) =>
+  typeof req.headers?.["content-type"] === "string" &&
+  req.headers["content-type"].toLowerCase().includes("multipart/form-data");
+
 const normalizeServiceImages = (imagesInput) => {
   if (imagesInput === undefined) return undefined;
 
-  const rawImages = Array.isArray(imagesInput) ? imagesInput : [imagesInput];
+  const parsedImages = parseMaybeJson(imagesInput);
+  const rawImages = Array.isArray(parsedImages)
+    ? parsedImages
+    : (parsedImages && typeof parsedImages === "object" && !isImageObject(parsedImages))
+      ? objectValuesInOrder(parsedImages)
+      : [parsedImages];
 
   return rawImages
     .map((item) => {
-      if (typeof item === "string") {
-        return { imageUrl: item, caption: "" };
+      const parsedItem = parseMaybeJson(item);
+
+      if (Array.isArray(parsedItem)) {
+        return normalizeServiceImages(parsedItem);
       }
 
-      if (item && typeof item === "object") {
-        const imageUrl = item.imageUrl || item.url || "";
-        const caption = typeof item.caption === "string" ? item.caption : "";
+      const normalizedItem = parsedItem && typeof parsedItem === "object" ? parsedItem : item;
+
+      if (typeof normalizedItem === "string") {
+        return { imageUrl: normalizedItem.trim(), caption: "" };
+      }
+
+      if (normalizedItem && typeof normalizedItem === "object") {
+        const imageUrl = (normalizedItem.imageUrl || normalizedItem.url || "").toString().trim();
+        const caption = typeof normalizedItem.caption === "string" ? normalizedItem.caption : "";
         return imageUrl ? { imageUrl, caption } : null;
       }
 
       return null;
     })
+    .flat()
     .filter(Boolean);
 };
 
 exports.createService = asyncHandler(async (req, res) => {
-  const { serviceName, category, description, price, images, availabilityStatus } = req.body;
+  const { serviceName, category, description, price, availabilityStatus } = req.body;
   const provider = await User.findById(req.user.id).select("role isApproved accountStatus");
 
   if (
@@ -52,6 +130,18 @@ exports.createService = asyncHandler(async (req, res) => {
     throw error;
   }
 
+  const normalizedImages = normalizeServiceImages(getImagesFromBody(req.body)) || [];
+  if (isMultipartRequest(req) && normalizedImages.length === 0) {
+    const error = new Error("Multipart file upload is not supported on this endpoint. Send image URLs in the body.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (normalizedImages.length > 10) {
+    const error = new Error("Maximum 10 images are allowed");
+    error.statusCode = 400;
+    throw error;
+  }
+
   const service = await Service.create({
     serviceName,
     category,
@@ -60,7 +150,7 @@ exports.createService = asyncHandler(async (req, res) => {
     availabilityStatus: ["Available", "Unavailable"].includes(availabilityStatus)
       ? availabilityStatus
       : "Available",
-    images: normalizeServiceImages(images) || [],
+    images: normalizedImages,
     providerId: req.user.id
   });
 
@@ -134,19 +224,32 @@ exports.updateService = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const allowedFields = ["serviceName", "category", "description", "price", "images", "availabilityStatus"];
+  const allowedFields = ["serviceName", "category", "description", "price", "availabilityStatus"];
 
   allowedFields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(req.body, field)) {
       if (field === "price") {
         service.price = Number(req.body.price);
-      } else if (field === "images") {
-        service.images = normalizeServiceImages(req.body.images) || [];
       } else {
         service[field] = req.body[field];
       }
     }
   });
+
+  if (IMAGE_FIELD_NAMES.some((fieldName) => Object.prototype.hasOwnProperty.call(req.body, fieldName))) {
+    const normalizedImages = normalizeServiceImages(getImagesFromBody(req.body)) || [];
+    if (isMultipartRequest(req) && normalizedImages.length === 0) {
+      const error = new Error("Multipart file upload is not supported on this endpoint. Send image URLs in the body.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (normalizedImages.length > 10) {
+      const error = new Error("Maximum 10 images are allowed");
+      error.statusCode = 400;
+      throw error;
+    }
+    service.images = normalizedImages;
+  }
 
   if (service.price <= 0) {
     const error = new Error("price must be a positive number");

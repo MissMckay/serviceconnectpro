@@ -110,7 +110,32 @@ exports.getUserDetailsAdmin = asyncHandler(async (req, res) => {
 });
 
 exports.updateUserRole = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
+  const { id } = req.params;
+  const { role } = req.body || {};
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid user ID"
+    });
+  }
+
+  const allowedRoles = ["user", "provider", "admin"];
+  if (typeof role !== "string" || !allowedRoles.includes(role)) {
+    return res.status(400).json({
+      success: false,
+      message: "role must be one of: user, provider, admin"
+    });
+  }
+
+  if (req.user && req.user.id === id && role !== "admin") {
+    return res.status(400).json({
+      success: false,
+      message: "Admins cannot remove their own admin role"
+    });
+  }
+
+  const user = await User.findById(id).select("-password");
 
   if (!user) {
     const error = new Error("User not found");
@@ -118,7 +143,7 @@ exports.updateUserRole = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  user.role = req.body.role;
+  user.role = role;
   await user.save();
 
   res.json({

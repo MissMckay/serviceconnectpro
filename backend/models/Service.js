@@ -50,7 +50,6 @@ const serviceSchema = new mongoose.Schema({
       }
     }
   ],
-
   providerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -58,5 +57,9 @@ const serviceSchema = new mongoose.Schema({
   }
 
 }, { timestamps: true });
+
+serviceSchema.path("images").validate(function (value) {
+  return !Array.isArray(value) || value.length <= 10;
+}, "Maximum 10 images are allowed");
 
 module.exports = mongoose.model("Service", serviceSchema);

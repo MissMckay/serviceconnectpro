@@ -7,7 +7,7 @@ const cors = require("cors");
 
 
 const app = express();
-const bodyLimit = process.env.BODY_SIZE_LIMIT || "1mb";
+const bodyLimit = process.env.BODY_SIZE_LIMIT || "50mb";
 
 app.use(cors({
   origin: "http://localhost:5173",
