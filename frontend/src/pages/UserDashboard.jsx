@@ -186,7 +186,7 @@ const UserDashboard = () => {
       console.log("Error fetching services:", err);
       setServices([]);
       if (!err.response) {
-        setError("Cannot reach backend API. Make sure the server is running on port 5000.");
+        setError("Cannot reach backend API. Verify your backend server is running and the Vite proxy target is correct.");
       } else {
         setError(err.response?.data?.message || "Failed to load services.");
       }

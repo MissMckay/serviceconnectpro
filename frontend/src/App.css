@@ -1425,6 +1425,12 @@ textarea:focus {
   background: #f8f9fc;
 }
 
+.provider-media-hint {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
 .provider-media-row {
   display: grid;
   grid-template-columns: 110px 1fr auto;

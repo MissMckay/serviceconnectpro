@@ -41,6 +41,8 @@ const serviceCategoryOptions = [
   "Delivery Services"
 ];
 
+const MAX_MEDIA_PAYLOAD_BYTES = 20 * 1024 * 1024;
+
 const getDataArray = (res) =>
   Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : [];
 
@@ -61,6 +63,14 @@ const decodeJwtPayload = (token) => {
     return JSON.parse(decoded);
   } catch {
     return null;
+  }
+};
+
+const getApproxPayloadBytes = (value) => {
+  try {
+    return new Blob([JSON.stringify(value)]).size;
+  } catch {
+    return Number.MAX_SAFE_INTEGER;
   }
 };
 
@@ -201,7 +211,7 @@ const ProviderDashboard = () => {
     if (!feedback.message) return undefined;
     const timer = setTimeout(() => {
       setFeedback({ type: "", message: "" });
-    }, 2000);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [feedback.message]);
 
@@ -234,27 +244,42 @@ const ProviderDashboard = () => {
     }
 
     const filesToUpload = incomingFiles.slice(0, remainingSlots);
-    if (incomingFiles.length > filesToUpload.length) {
-      showError("Only the first 10 images can be uploaded.");
-    }
+    const skippedCount = Math.max(0, incomingFiles.length - filesToUpload.length);
+    const results = await Promise.allSettled(
+      filesToUpload.map(async (file) => ({
+        url: await readFileAsDataUrl(file),
+        description: "",
+        name: file.name
+      }))
+    );
 
-    try {
-      const uploaded = await Promise.all(
-        filesToUpload.map(async (file) => ({
-          url: await readFileAsDataUrl(file),
-          description: "",
-          name: file.name
-        }))
-      );
+    const uploaded = results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    const failedNames = results
+      .map((result, index) => ({ result, index }))
+      .filter(({ result }) => result.status === "rejected")
+      .map(({ index }) => filesToUpload[index]?.name)
+      .filter(Boolean);
+
+    if (uploaded.length) {
       setServiceForm((prev) => ({
         ...prev,
         imageDetails: [...prev.imageDetails, ...uploaded].slice(0, 10)
       }));
-    } catch {
-      showError("Unable to process one or more images.");
-    } finally {
-      event.target.value = "";
     }
+
+    if (failedNames.length || skippedCount > 0) {
+      const failuresText = failedNames.length
+        ? ` Failed to read: ${failedNames.join(", ")}.`
+        : "";
+      const skippedText = skippedCount > 0 ? ` ${skippedCount} file(s) were skipped due to the 10-image limit.` : "";
+      showError(`Some files were not added.${failuresText}${skippedText}`);
+    } else {
+      showSuccess(`${uploaded.length} image(s) added.`);
+    }
+
+    event.target.value = "";
   };
 
   const removeMediaRow = (index) => {
@@ -311,9 +336,14 @@ const ProviderDashboard = () => {
         providerLocation: providerAddress || undefined,
         location: providerAddress || undefined,
         address: providerAddress || undefined,
-        imageDetails: normalizedMedia,
-        images: normalizedMedia.map((entry) => entry.url)
+        image: normalizedMedia[0]?.url || undefined,
+        imageDetails: normalizedMedia
       };
+
+      if (getApproxPayloadBytes(payload.imageDetails) > MAX_MEDIA_PAYLOAD_BYTES) {
+        showError("Images are too large (max total is about 20MB). Remove some images or use smaller files.");
+        return;
+      }
 
       if (editingServiceId) {
         await API.put(`/services/${editingServiceId}`, payload);
@@ -329,6 +359,10 @@ const ProviderDashboard = () => {
       navigate("/provider?view=manage");
       showSuccess(editingServiceId ? "Service updated successfully." : "Service added successfully.");
     } catch (err) {
+      if (err.response?.status === 413) {
+        showError("Images are too large for upload (max total is about 20MB). Remove some images or use smaller files.");
+        return;
+      }
       if (err.response?.status === 403) {
         showError(err.response?.data?.message || "Pending admin approval.");
         return;
@@ -549,6 +583,7 @@ const ProviderDashboard = () => {
 
                 <div className="provider-media-wrapper">
                   <label className="provider-field-label">Service Images (up to 10)</label>
+                  <p className="provider-media-hint">Upload up to 10 photos (about 20MB total).</p>
                   <input
                     type="file"
                     accept="image/*"
