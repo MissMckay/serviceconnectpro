@@ -1,0 +1,130 @@
+/* ==========================================================================
+   ServiceConnect – Design System & Base
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --brand-blue: #002868;
+  --brand-blue-hover: #001c4d;
+  --brand-red: #c41e3a;
+  --brand-red-hover: #a01830;
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --border-focus: #002868;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --font-sans: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 24px rgba(0,0,0,0.1);
+  --bg-white: #ffffff;
+  --bg-light: #f4f6f8;
+  --text-dark: #1a1a1a;
+  --shadow-soft: 0 16px 40px rgba(15,23,42,0.08);
+}
+
+html { font-size: 16px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+html, body, #root { height: 100%; }
+
+body {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-page);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+h1,h2,h3,h4,h5,h6 {
+  color: var(--brand-blue);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+button {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  font-size: var(--text-sm);
+  background: var(--brand-red);
+  color: #fff;
+  transition: background .2s, transform .15s, box-shadow .2s;
+}
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(196,30,58,0.25);
+}
+button:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+input, select, textarea {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  transition: border-color .2s, box-shadow .2s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(0,40,104,0.12);
+}
+
+a { color: var(--brand-blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.page-shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.page-title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--brand-blue);
+  margin-bottom: var(--space-5);
+  letter-spacing: -0.02em;
+}

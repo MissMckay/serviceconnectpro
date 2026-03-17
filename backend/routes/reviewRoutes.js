@@ -7,6 +7,7 @@ const authorizeRoles = require("../middleware/roleMiddleware");
 const {
   createReview,
   getServiceReviews,
+  getReviewByBooking,
   deleteReview
 } = require("../controllers/reviewController");
 
@@ -24,6 +25,11 @@ router.post(
  * PUBLIC: Get Reviews By Service
  */
 router.get("/service/:serviceId", getServiceReviews);
+
+/**
+ * USER: Get review by booking (for current user)
+ */
+router.get("/booking/:bookingId", verifyToken, getReviewByBooking);
 
 /**
  * USER/ADMIN: Delete Review

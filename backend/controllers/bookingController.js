@@ -42,15 +42,6 @@ exports.createBooking = asyncHandler(async (req, res) => {
   });
 });
 
-exports.getUserBookings = asyncHandler(async (req, res) => {
-  const bookings = await Booking.find({ userId: req.user.id }).populate("serviceId");
-
-  res.json({
-    success: true,
-    data: bookings
-  });
-});
-
 exports.getProviderBookings = asyncHandler(async (req, res) => {
   const bookings = await Booking.find({ providerId: req.user.id })
     .populate("serviceId", "serviceName category price")
@@ -80,8 +71,9 @@ exports.getBookingById = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const isOwnerUser = booking.userId?._id?.toString() === req.user.id;
-  const isOwnerProvider = booking.providerId?._id?.toString() === req.user.id;
+  const uid = String(req.user.id);
+  const isOwnerUser = (booking.userId && (booking.userId._id ? String(booking.userId._id) : String(booking.userId))) === uid;
+  const isOwnerProvider = (booking.providerId && (booking.providerId._id ? String(booking.providerId._id) : String(booking.providerId))) === uid;
 
   if (!isOwnerUser && !isOwnerProvider) {
     const error = new Error("Access denied");
@@ -148,12 +140,12 @@ exports.getMyBookings = asyncHandler(async (req, res) => {
   throw error;
 });
 
-// Get User Booking History
+// Get User Booking History (serviceId includes images for booking cards)
 exports.getUserBookings = asyncHandler(async (req, res) => {
   const bookings = await Booking.find({
     userId: req.user.id
   })
-    .populate("serviceId", "serviceName price")
+    .populate("serviceId", "serviceName price images")
     .populate("providerId", "name email providerAddress");
 
   res.json({

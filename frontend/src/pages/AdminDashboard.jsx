@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useContext } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import API from "../services/api";
+import { AuthContext } from "../context/AuthContext";
+import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeUsers } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
 
-const allowedSections = new Set(["overview", "users", "services", "reports"]);
+const allowedSections = new Set(["overview", "users", "services", "reports", "create-admin"]);
 
 const getSectionFromSearch = (search) => {
   const view = new URLSearchParams(search).get("view");
@@ -92,8 +94,12 @@ const getBooleanLabel = (value) => (value === true ? "Yes" : "No");
 const AdminDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
 
   const [activeSection, setActiveSection] = useState(() => getSectionFromSearch(location.search));
+  const [adminInviteCodes, setAdminInviteCodes] = useState([]);
+  const [adminInviteLoading, setAdminInviteLoading] = useState(false);
+  const [adminInviteError, setAdminInviteError] = useState("");
   const [users, setUsers] = useState([]);
   const [services, setServices] = useState([]);
   const [isUsersLoading, setIsUsersLoading] = useState(false);
@@ -140,6 +146,25 @@ const AdminDashboard = () => {
     return () => clearTimeout(timer);
   }, [toast.message]);
 
+  useEffect(() => {
+    if (activeSection !== "create-admin" || !user?.uid) {
+      setAdminInviteCodes([]);
+      return;
+    }
+    const unsub = subscribeAdminInviteCodes(user.uid, setAdminInviteCodes, 2000);
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [activeSection, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    setIsUsersLoading(true);
+    const unsub = subscribeUsers((list) => {
+      setUsers(list);
+      setIsUsersLoading(false);
+    }, 2000);
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [user?.uid]);
+
   const showSuccess = (message) => setToast({ type: "success", message });
   const showError = (message) => setToast({ type: "error", message });
 
@@ -172,7 +197,6 @@ const AdminDashboard = () => {
       const nextUsers = getArrayPayload(response);
       setUsers(nextUsers);
     } catch {
-      setUsers([]);
       setError("Unable to load admin users.");
     } finally {
       setIsUsersLoading(false);
@@ -250,13 +274,30 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    refreshUsers();
     refreshServices();
   }, []);
 
-  useEffect(() => {
-    refreshUsers();
-  }, [usersFilters.search, usersFilters.role, usersFilters.status, usersFilters.approved]);
+  const filteredUsers = useMemo(() => {
+    const search = normalizeText(usersFilters.search);
+    const roleFilter = usersFilters.role !== "all" ? normalizeText(usersFilters.role) : "";
+    const statusFilter = usersFilters.status !== "all" ? normalizeText(usersFilters.status) : "";
+    const approvedFilter = usersFilters.approved === "all" ? null : usersFilters.approved === "approved";
+    return users.filter((u) => {
+      const matchesSearch =
+        !search ||
+        normalizeText(u?.name).includes(search) ||
+        normalizeText(u?.email).includes(search) ||
+        normalizeText(u?.phone).includes(search);
+      const matchesRole = !roleFilter || normalizeText(u?.role) === roleFilter;
+      const status = normalizeText(u?.accountStatus) || "active";
+      const matchesStatus = !statusFilter || status === statusFilter;
+      const matchesApproved =
+        approvedFilter === null ||
+        (approvedFilter === true && (u?.isApproved === true || normalizeText(u?.approvalStatus) === "approved")) ||
+        (approvedFilter === false && u?.isApproved !== true && normalizeText(u?.approvalStatus) !== "approved");
+      return matchesSearch && matchesRole && matchesStatus && matchesApproved;
+    });
+  }, [users, usersFilters.search, usersFilters.role, usersFilters.status, usersFilters.approved]);
 
   useEffect(() => {
     refreshServices();
@@ -270,7 +311,7 @@ const AdminDashboard = () => {
   ]);
 
   const refreshAllAdminTables = async () => {
-    await Promise.all([refreshUsers(), refreshServices()]);
+    await refreshServices();
   };
 
   const usersSummary = useMemo(() => {
@@ -335,24 +376,25 @@ const AdminDashboard = () => {
   const runUserStatusAction = async (userId, accountStatus) => {
     setBusyActionId(`${userId}-status-${accountStatus}`);
     try {
-      let success = false;
+      let apiSuccess = false;
       const requests = [
         () => API.put(`/admin/users/${userId}/status`, { accountStatus }),
         () => API.patch(`/admin/users/${userId}/status`, { accountStatus })
       ];
-
       for (const request of requests) {
         try {
           await request();
-          success = true;
+          apiSuccess = true;
           break;
         } catch {
           // Try next endpoint.
         }
       }
-
-      if (!success) throw new Error("status-update-failed");
-      await refreshAllAdminTables();
+      try {
+        await updateUserProfile(userId, { accountStatus });
+      } catch (e) {
+        if (!apiSuccess) throw new Error("status-update-failed");
+      }
       showSuccess(`User ${accountStatus}.`);
     } catch (err) {
       showError(err?.response?.data?.message || "Unable to update account status.");
@@ -392,6 +434,13 @@ const AdminDashboard = () => {
       }
 
       if (!success) throw new Error("provider-approval-failed");
+      try {
+        await updateUserProfile(providerId, isApprove
+          ? { isApproved: true, approvalStatus: "approved", accountStatus: "active" }
+          : { isApproved: false, approvalStatus: "rejected", accountStatus: "suspended" });
+      } catch (firestoreErr) {
+        console.warn("Firestore profile update (provider approval):", firestoreErr);
+      }
       await refreshAllAdminTables();
       showSuccess(isApprove ? "Provider approved." : "Provider rejected.");
     } catch (err) {
@@ -405,17 +454,20 @@ const AdminDashboard = () => {
     const userId = user?._id || user?.id;
     if (!userId) return;
 
-    if (!window.confirm(`Delete user "${user?.name || user?.email || userId}"?`)) return;
+    if (!window.confirm(`Delete user "${user?.name || user?.email || userId}"? This cannot be undone.`)) return;
 
     setBusyActionId(`${userId}-delete`);
     try {
-      await API.delete(`/admin/users/${userId}`);
-      await refreshAllAdminTables();
+      try {
+        await API.delete(`/admin/users/${userId}`);
+      } catch (apiErr) {
+        await deleteUserProfile(userId);
+      }
       showSuccess("User deleted.");
     } catch (err) {
       showError(
         err?.response?.data?.message ||
-          "Unable to delete this user. Backend may enforce suspension-only safe deletion."
+          "Unable to delete this user."
       );
     } finally {
       setBusyActionId("");
@@ -448,23 +500,34 @@ const AdminDashboard = () => {
       setDetailsModal({
         open: true,
         loading: false,
-        user,
-        details: {
-          ...payload,
-          bookingsCount,
-          reviewsCount
-        }
+        user: { ...user, ...payload },
+        details: { ...payload, bookingsCount, reviewsCount }
       });
     } catch {
-      setDetailsModal({
-        open: true,
-        loading: false,
-        user,
-        details: {
-          bookingsCount: user?.bookingsCount || 0,
-          reviewsCount: user?.reviewsCount || 0
-        }
-      });
+      try {
+        const profile = await getUserProfile(userId);
+        const merged = profile ? { ...user, ...profile } : user;
+        setDetailsModal({
+          open: true,
+          loading: false,
+          user: merged,
+          details: {
+            ...profile,
+            bookingsCount: user?.bookingsCount || 0,
+            reviewsCount: user?.reviewsCount || 0
+          }
+        });
+      } catch {
+        setDetailsModal({
+          open: true,
+          loading: false,
+          user,
+          details: {
+            bookingsCount: user?.bookingsCount || 0,
+            reviewsCount: user?.reviewsCount || 0
+          }
+        });
+      }
     }
   };
 
@@ -577,23 +640,30 @@ const AdminDashboard = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {users.length === 0 ? (
+                      {filteredUsers.length === 0 ? (
                         <tr><td colSpan="8" className="admin-empty-row">No users found.</td></tr>
-                      ) : users.map((user) => {
+                      ) : filteredUsers.map((user) => {
                         const userId = user?._id || user?.id;
                         const isProvider = normalizeText(user?.role) === "provider";
                         const status = normalizeText(user?.accountStatus) || "active";
+                        const isApproved = user?.isApproved === true || normalizeText(user?.approvalStatus) === "approved";
+                        const isPendingProvider = isProvider && !isApproved;
+                        const isSuspended = status === "suspended";
                         return (
                           <tr key={userId}>
                             <td>{user?.name || "N/A"}</td><td>{user?.email || "N/A"}</td><td>{user?.phone || "N/A"}</td><td>{user?.role || "N/A"}</td><td>{status}</td><td>{getBooleanLabel(user?.isApproved)}</td><td>{formatDate(user?.createdAt)}</td>
                             <td>
                               <div className="admin-inline-actions">
-                                <button type="button" className="admin-action-btn suspend-btn" onClick={() => runUserStatusAction(userId, "suspended")} disabled={getUserBusy(userId, "status-suspended")}>Suspend</button>
-                                <button type="button" className="admin-action-btn activate-btn" onClick={() => runUserStatusAction(userId, "active")} disabled={getUserBusy(userId, "status-active")}>Activate</button>
-                                {isProvider && <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Approve Provider</button>}
-                                {isProvider && <button type="button" className="admin-action-btn reject-btn" onClick={() => handleProviderApproval(userId, "reject")} disabled={getUserBusy(userId, "reject")}>Reject Provider</button>}
-                                <button type="button" className="admin-action-btn" onClick={() => openUserDetails(user)}>View Details</button>
-                                <button type="button" className="admin-action-btn remove-btn" onClick={() => deleteUser(user)} disabled={getUserBusy(userId, "delete")}>Delete User</button>
+                                <button type="button" className="admin-action-btn view-profile-btn" onClick={() => openUserDetails(user)}>View profile</button>
+                                {isPendingProvider && (
+                                  <>
+                                    <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Accept</button>
+                                    <button type="button" className="admin-action-btn reject-btn" onClick={() => handleProviderApproval(userId, "reject")} disabled={getUserBusy(userId, "reject")}>Reject</button>
+                                  </>
+                                )}
+                                <button type="button" className="admin-action-btn suspend-btn" onClick={() => runUserStatusAction(userId, "suspended")} disabled={getUserBusy(userId, "status-suspended") || isSuspended}>Suspend</button>
+                                <button type="button" className="admin-action-btn activate-btn" onClick={() => runUserStatusAction(userId, "active")} disabled={getUserBusy(userId, "status-active") || !isSuspended}>Activate</button>
+                                <button type="button" className="admin-action-btn remove-btn" onClick={() => deleteUser(user)} disabled={getUserBusy(userId, "delete")}>Delete</button>
                               </div>
                             </td>
                           </tr>
@@ -667,6 +737,98 @@ const AdminDashboard = () => {
           </section>
         )}
 
+        {activeSection === "create-admin" && (
+          <section className="admin-grid">
+            <article className="admin-card">
+              <h2 className="admin-card-title">Create admin accounts</h2>
+              <p className="admin-subtitle">Generate one-time invite links. Share each link with the person who should become an admin. They open the link, create their account, then sign in at <strong>Admin login</strong>. You can create as many admins as you need; the list below updates in real time.</p>
+              {adminInviteError && <p className="admin-error">{adminInviteError}</p>}
+              <div style={{ marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className="admin-action-btn"
+                  disabled={adminInviteLoading || !user?.uid}
+                  onClick={async () => {
+                    setAdminInviteError("");
+                    setAdminInviteLoading(true);
+                    try {
+                      await createAdminInviteCode(user.uid);
+                      const list = await getAdminInviteCodesList();
+                      setAdminInviteCodes(list);
+                      showSuccess("Invite link created. It appears in the list below.");
+                    } catch (e) {
+                      setAdminInviteError(e?.message || "Failed to generate invite link.");
+                    } finally {
+                      setAdminInviteLoading(false);
+                    }
+                  }}
+                >
+                  {adminInviteLoading ? "Generating…" : "Generate another admin invite link"}
+                </button>
+              </div>
+              <div style={{ marginTop: "1.5rem" }}>
+                <h3 style={{ marginBottom: "0.75rem", fontSize: "1rem" }}>Invite links (updates in real time)</h3>
+                {adminInviteCodes.length === 0 ? (
+                  <p className="admin-empty-row">No invite links yet. Click the button above to generate one.</p>
+                ) : (
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Link</th>
+                          <th>Status</th>
+                          <th>Created</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminInviteCodes.map((row) => {
+                          const base = typeof window !== "undefined" ? window.location.origin : "";
+                          const link = `${base}/register-admin?code=${row.code}`;
+                          const used = !!row.usedBy;
+                          const created = row.createdAt ? formatDate(row.createdAt) : "—";
+                          return (
+                            <tr key={row.id}>
+                              <td>
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={link}
+                                  style={{ width: "100%", maxWidth: "320px", padding: "6px 8px", fontSize: "13px", boxSizing: "border-box" }}
+                                  onFocus={(e) => e.target.select()}
+                                />
+                              </td>
+                              <td>
+                                <span style={{ color: used ? "#6b7280" : "#059669", fontWeight: 500 }}>
+                                  {used ? "Used" : "Pending"}
+                                </span>
+                              </td>
+                              <td>{created}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="admin-action-btn"
+                                  disabled={used}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(link);
+                                    showSuccess("Link copied to clipboard.");
+                                  }}
+                                >
+                                  Copy
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </article>
+          </section>
+        )}
+
         {activeSection === "reports" && (
           <section className="admin-grid admin-grid-overview">
             <article className="admin-card">
@@ -690,7 +852,7 @@ const AdminDashboard = () => {
           <div className="admin-modal-backdrop" role="presentation" onClick={closeUserDetails}>
             <div className="admin-modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
               <div className="admin-modal-header">
-                <h3>User Details</h3>
+                <h3>User profile</h3>
                 <button type="button" className="admin-action-btn" onClick={closeUserDetails}>Close</button>
               </div>
               {detailsModal.loading ? <p>Loading profile...</p> : (

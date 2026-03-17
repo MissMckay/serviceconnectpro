@@ -1,15 +1,23 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import API from "../services/api";
+import { AuthContext } from "../context/AuthContext";
+import {
+  subscribeBookingsByUser,
+  updateBookingStatus,
+  createReview,
+  getReviewByBookingAndUser,
+  getServiceById,
+} from "../firebase/firestoreServices";
 import { formatStars } from "../utils/rating";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 
 const UserBookings = () => {
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
   const [bookings, setBookings] = useState([]);
+  const [servicesMap, setServicesMap] = useState({});
   const [reviews, setReviews] = useState({});
-  const [serviceReviews, setServiceReviews] = useState({});
   const [submittingId, setSubmittingId] = useState("");
   const [cancellingId, setCancellingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
@@ -50,42 +58,20 @@ const UserBookings = () => {
     const completedBookings = bookingList.filter(
       (booking) => booking.status === "Completed" && getServiceRefId(booking)
     );
-
     if (!completedBookings.length) return;
-
-    const serviceIds = [...new Set(completedBookings.map((b) => getServiceRefId(b)).filter(Boolean))];
-    const responses = await Promise.all(
-      serviceIds.map((serviceId) =>
-        API.get(`/reviews/service/${serviceId}`).catch(() => null)
-      )
-    );
-
-    const reviewedBookingIds = new Set();
-    responses.forEach((res) => {
-      const list = res?.data?.data || [];
-      list.forEach((review) => {
-        if (review?.bookingId) {
-          reviewedBookingIds.add(String(review.bookingId));
+    for (const booking of completedBookings) {
+      try {
+        const existing = await getReviewByBookingAndUser(booking._id, user?.uid);
+        if (existing) {
+          setReviews((prev) => ({
+            ...prev,
+            [booking._id]: { rating: existing.rating, comment: existing.comment || "", submitted: true },
+          }));
         }
-      });
-    });
-
-    if (!reviewedBookingIds.size) return;
-
-    setReviews((prev) => {
-      const next = { ...prev };
-      completedBookings.forEach((booking) => {
-        const bookingId = String(booking._id);
-        if (reviewedBookingIds.has(bookingId)) {
-          next[bookingId] = {
-            rating: prev[bookingId]?.rating || 5,
-            comment: prev[bookingId]?.comment || "",
-            submitted: true
-          };
-        }
-      });
-      return next;
-    });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const getReviewTimestamp = (review) => {
@@ -102,81 +88,51 @@ const UserBookings = () => {
     review?.name ||
     "Anonymous";
 
-  // `silent=true` refreshes data without toggling loading text.
-  const fetchBookings = async (silent = false) => {
-    if (!silent) {
-      setIsLoading(true);
-      setError("");
+  useEffect(() => {
+    if (!user?.uid) {
+      setIsLoading(false);
+      setBookings([]);
+      return;
     }
-
+    setIsLoading(true);
+    setError("");
+    let unsub;
     try {
-      const res = await API.get("/bookings/user");
-      const bookingData = res.data.data || [];
-      setBookings(bookingData);
-
-      const serviceIds = [
-        ...new Set(
-          bookingData
-            .map((booking) => getServiceRefId(booking))
-            .filter(Boolean)
-            .map(String)
-        )
-      ];
-
-      if (serviceIds.length) {
-        const reviewResponses = await Promise.all(
-          serviceIds.map((serviceId) =>
-            API.get(`/reviews/service/${serviceId}`)
-              .then((reviewRes) => ({
-                serviceId,
-                reviews: Array.isArray(reviewRes.data?.data) ? reviewRes.data.data : []
-              }))
-              .catch(() => ({ serviceId, reviews: [] }))
-          )
-        );
-
-        setServiceReviews((prev) => {
-          const next = { ...prev };
-          reviewResponses.forEach((entry) => {
-            next[String(entry.serviceId)] = entry.reviews;
-          });
-          return next;
-        });
-      } else {
-        setServiceReviews({});
-      }
-
-      await markSubmittedReviews(bookingData);
-    } catch (err) {
-      console.log("Error fetching bookings:", err);
-      const status = Number(err?.response?.status || 0);
-      const noBookingsYet = status === 404;
-      if (noBookingsYet) {
-        setBookings([]);
-        setServiceReviews({});
+      unsub = subscribeBookingsByUser(user.uid, (bookingData) => {
+        setBookings(bookingData);
         setError("");
-        return;
-      }
-      if (!silent) {
-        setBookings([]);
-        setError(err.response?.data?.message || "Failed to load bookings.");
-      }
-    } finally {
-      if (!silent) {
         setIsLoading(false);
-      }
+        markSubmittedReviews(bookingData);
+      });
+    } catch (err) {
+      setBookings([]);
+      setError(err?.message || "Failed to load bookings.");
+      setIsLoading(false);
     }
-  };
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
-    fetchBookings();
-
-    const interval = setInterval(() => {
-      fetchBookings(true);
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
+    const loadServices = async () => {
+      const ids = [...new Set(bookings.map((b) => getServiceRefId(b)).filter(Boolean))];
+      const map = {};
+      await Promise.all(
+        ids.map(async (sid) => {
+          try {
+            const s = await getServiceById(sid);
+            if (s) map[sid] = s;
+          } catch {
+            // ignore
+          }
+        })
+      );
+      setServicesMap(map);
+    };
+    if (bookings.length) loadServices();
+    else setServicesMap({});
+  }, [bookings]);
 
   const cancelBooking = async (id) => {
     const booking = bookings.find((item) => String(item._id) === String(id));
@@ -188,15 +144,12 @@ const UserBookings = () => {
       alert("Only pending bookings can be cancelled.");
       return;
     }
-
     try {
       setCancellingId(id);
-      await API.put(`/bookings/cancel/${id}`);
+      await updateBookingStatus(id, "Cancelled");
       alert("Booking Cancelled");
-      fetchBookings(true);
     } catch (err) {
-      console.log("Cancel error:", err);
-      alert(err.response?.data?.message || "Failed to cancel booking");
+      alert(err?.message || "Failed to cancel booking");
     } finally {
       setCancellingId("");
     }
@@ -216,7 +169,7 @@ const UserBookings = () => {
 
   const submitReview = async (bookingId) => {
     const booking = bookings.find((item) => String(item._id) === String(bookingId));
-    if (!booking) {
+    if (!booking || !user) {
       alert("You can only review your own bookings.");
       return;
     }
@@ -224,76 +177,34 @@ const UserBookings = () => {
       alert("Review is allowed only for completed bookings.");
       return;
     }
-
     const review = reviews[bookingId] || { rating: 5, comment: "" };
     if (!review.comment.trim()) {
       alert("Comment is required.");
       return;
     }
-
     setSubmittingId(bookingId);
     try {
-      await API.post("/reviews", {
+      await createReview({
         bookingId,
+        serviceId: booking.serviceId,
+        userId: user.uid,
         rating: Number(review.rating),
-        comment: review.comment.trim()
+        comment: review.comment.trim(),
       });
-
-      setReviews((prev) => ({
-        ...prev,
-        [bookingId]: {
-          ...review,
-          submitted: true
-        }
-      }));
+      setReviews((prev) => ({ ...prev, [bookingId]: { ...review, submitted: true } }));
       alert("Review submitted successfully");
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to submit review");
+      alert(err?.message || "Failed to submit review");
     } finally {
       setSubmittingId("");
     }
   };
 
   const deleteBooking = async (bookingId) => {
-    const booking = bookings.find((item) => String(item._id) === String(bookingId));
-    if (!booking) {
-      alert("Booking not found.");
-      return;
-    }
-
     if (!window.confirm("Delete this booking from your history?")) return;
-
     setDeletingId(bookingId);
-    try {
-      const endpoints = [`/bookings/${bookingId}`];
-      let deleted = false;
-
-      for (const endpoint of endpoints) {
-        try {
-          await API.delete(endpoint);
-          deleted = true;
-          break;
-        } catch {
-          // try next delete endpoint
-        }
-      }
-
-      if (!deleted) {
-        throw new Error("Unable to delete booking.");
-      }
-
-      setBookings((prev) => prev.filter((item) => String(item._id) !== String(bookingId)));
-      setReviews((prev) => {
-        const next = { ...prev };
-        delete next[bookingId];
-        return next;
-      });
-      alert("Booking deleted from history.");
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete booking.");
-    } finally {
-      setDeletingId("");
-    }
+    alert("Delete is not supported with Firebase. You can cancel pending bookings instead.");
+    setDeletingId("");
   };
 
   const getStatusColor = (status) => {
@@ -312,85 +223,57 @@ const UserBookings = () => {
     }
   };
 
-  const getProviderName = (booking) =>
-    booking?.serviceSnapshot?.providerName ||
-    booking?.serviceProviderName ||
-    booking?.providerId?.name ||
-    booking?.provider?.name ||
-    booking?.providerName ||
-    booking?.serviceId?.providerName ||
-    booking?.serviceId?.provider?.providerName ||
-    booking?.serviceId?.providerId?.name ||
-    booking?.serviceId?.provider?.name ||
-    booking?.serviceId?.createdBy?.name ||
-    "Not provided";
+  const getProviderName = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.providerName || booking?.providerName || "Not provided";
+  };
 
-  const getProviderLocation = (booking) =>
-    booking?.serviceSnapshot?.providerAddress ||
-    booking?.serviceSnapshot?.providerLocation ||
-    booking?.providerAddress ||
-    booking?.providerLocation ||
-    booking?.provider?.providerAddress ||
-    booking?.provider?.location ||
-    booking?.provider?.address ||
-    booking?.providerId?.providerAddress ||
-    booking?.providerId?.location ||
-    booking?.providerId?.address ||
-    booking?.serviceId?.providerId?.providerAddress ||
-    booking?.serviceId?.provider?.providerAddress ||
-    booking?.serviceId?.providerLocation ||
-    booking?.serviceId?.providerAddress ||
-    booking?.serviceId?.provider?.location ||
-    booking?.serviceId?.provider?.address ||
-    booking?.serviceId?.providerId?.location ||
-    booking?.serviceId?.providerId?.address ||
-    booking?.serviceId?.createdBy?.location ||
-    booking?.serviceId?.createdBy?.address ||
-    booking?.serviceId?.location ||
-    booking?.serviceId?.city ||
-    booking?.serviceId?.area ||
-    "Not provided";
+  const getProviderId = (booking) => {
+    const p = booking?.providerId;
+    if (typeof p === "string" && p.trim()) return p.trim();
+    if (p && typeof p === "object" && (p._id || p.id)) return p._id || p.id;
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.providerId || null;
+  };
 
-  const getServiceName = (booking) =>
-    booking?.serviceSnapshot?.serviceName ||
-    booking?.serviceName ||
-    booking?.service?.serviceName ||
-    booking?.serviceId?.serviceName ||
-    "Service";
+  const getProviderLocation = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.providerAddress || booking?.providerAddress || "Not provided";
+  };
 
-  const getServicePrice = (booking) =>
-    booking?.serviceSnapshot?.price ||
-    booking?.price ||
-    booking?.amount ||
-    booking?.totalAmount ||
-    booking?.service?.price ||
-    booking?.serviceId?.price;
+  const getServiceName = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.serviceName || booking?.serviceName || "Service";
+  };
 
-  const getServiceDescription = (booking) =>
-    booking?.serviceSnapshot?.description ||
-    booking?.serviceDescription ||
-    booking?.description ||
-    booking?.service?.description ||
-    booking?.serviceId?.description ||
-    "No description provided.";
+  const getServicePrice = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.price ?? booking?.price ?? booking?.amount;
+  };
 
-  const getServiceCategory = (booking) =>
-    booking?.serviceSnapshot?.category ||
-    booking?.serviceCategory ||
-    booking?.service?.category ||
-    booking?.serviceId?.category ||
-    "General";
+  const getServiceDescription = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.description || booking?.description || "No description provided.";
+  };
+
+  const getServiceCategory = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    return service?.category || booking?.category || "General";
+  };
 
   const getBookingImage = (booking) => {
-    const service =
-      (booking?.serviceId && typeof booking.serviceId === "object" ? booking.serviceId : null) ||
-      booking?.serviceSnapshot ||
-      {};
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    if (!service) return "";
     const images = getServiceMedia(service);
-    if (images.length > 0) {
-      return images[0].url;
-    }
-    return "";
+    return images.length > 0 ? images[0].url : "";
   };
 
   return (
@@ -477,14 +360,8 @@ const UserBookings = () => {
                 <h4 style={{ marginBottom: "8px" }}>Recent Reviews</h4>
                 {(() => {
                   const serviceId = getServiceRefId(booking);
-                  const canOpenService = Boolean(
-                    booking?.serviceId &&
-                    typeof booking.serviceId === "object" &&
-                    booking.serviceId?._id
-                  );
-                  const rawReviews = serviceId
-                    ? serviceReviews[String(serviceId)] || []
-                    : [];
+                  const canOpenService = Boolean(serviceId);
+                  const rawReviews = [];
                   const sortedReviews = [...rawReviews].sort(
                     (a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)
                   );
@@ -611,6 +488,26 @@ const UserBookings = () => {
                 )}
 
                 <div className="booking-actions-end" style={{ marginTop: "10px" }}>
+                  {getProviderId(booking) && String(booking.status || "").toLowerCase() === "completed" && (
+                    <button
+                      type="button"
+                      style={{
+                        ...actionButtonStyle,
+                        background: "var(--brand-blue)",
+                        marginRight: "8px"
+                      }}
+                      onClick={() =>
+                        navigate("/messages", {
+                          state: {
+                            recipientId: getProviderId(booking),
+                            recipientName: getProviderName(booking)
+                          }
+                        })
+                      }
+                    >
+                      Message provider
+                    </button>
+                  )}
                   <button
                     style={{
                       ...actionButtonStyle,

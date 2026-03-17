@@ -76,24 +76,33 @@ exports.getAllUsers = asyncHandler(async (req, res) => {
   });
 });
 
+const isValidUserId = (id) => {
+  if (id == null || typeof id !== "string") return false;
+  const v = id.trim();
+  if (!v) return false;
+  // Allow: Mongo ObjectId strings OR Firebase-like UIDs (20+ chars)
+  if (/^[a-fA-F0-9]{24}$/.test(v)) return true;
+  if (/^[A-Za-z0-9_-]{20,128}$/.test(v)) return true;
+  return false;
+};
+
 exports.getUserDetailsAdmin = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({ success: false, message: "Invalid user ID" });
   }
-
-  const user = await User.findById(id).select("-password");
+  const user = await User.findById(id.trim()).select("-password");
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found" });
   }
 
+  const uid = id.trim();
   const [bookingsCount, reviewsCount, servicesCount] = await Promise.all([
     Booking.countDocuments({
-      $or: [{ userId: id }, { providerId: id }]
+      $or: [{ userId: uid }, { providerId: uid }]
     }),
-    Review.countDocuments({ userId: id }),
-    Service.countDocuments({ providerId: id })
+    Review.countDocuments({ userId: uid }),
+    Service.countDocuments({ providerId: uid })
   ]);
 
   res.json({
@@ -112,13 +121,13 @@ exports.getUserDetailsAdmin = asyncHandler(async (req, res) => {
 exports.updateUserRole = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { role } = req.body || {};
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({
       success: false,
       message: "Invalid user ID"
     });
   }
+  const uid = id.trim();
 
   const allowedRoles = ["user", "provider", "admin"];
   if (typeof role !== "string" || !allowedRoles.includes(role)) {
@@ -128,14 +137,13 @@ exports.updateUserRole = asyncHandler(async (req, res) => {
     });
   }
 
-  if (req.user && req.user.id === id && role !== "admin") {
+  if (req.user && req.user.id === uid && role !== "admin") {
     return res.status(400).json({
       success: false,
       message: "Admins cannot remove their own admin role"
     });
   }
-
-  const user = await User.findById(id).select("-password");
+  const user = await User.findById(uid).select("-password");
 
   if (!user) {
     const error = new Error("User not found");
@@ -185,13 +193,13 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
 exports.updateUserStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { accountStatus } = req.body;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({
       success: false,
       message: "Invalid user ID"
     });
   }
+  const uid = id.trim();
 
   if (!["active", "suspended"].includes(accountStatus)) {
     return res.status(400).json({
@@ -200,17 +208,15 @@ exports.updateUserStatus = asyncHandler(async (req, res) => {
     });
   }
 
-  const user = await User.findById(id).select("-password");
+  const user = await User.findById(uid).select("-password");
   if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found"
     });
   }
-
   user.accountStatus = accountStatus;
   await user.save();
-
   res.json({
     success: true,
     data: user
@@ -221,35 +227,33 @@ exports.deleteUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const softDelete = String(req.query.softDelete || "false").toLowerCase() === "true";
   const hardDelete = String(req.query.hardDelete || "false").toLowerCase() === "true";
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({
       success: false,
       message: "Invalid user ID"
     });
   }
-
-  if (req.user && req.user.id === id) {
+  const uid = id.trim();
+  if (req.user && req.user.id === uid) {
     return res.status(400).json({
       success: false,
       message: "Admins cannot delete their own account"
     });
   }
 
-  const user = await User.findById(id);
+  const user = await User.findById(uid);
   if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found"
     });
   }
-
   if (softDelete && !hardDelete) {
     user.accountStatus = "suspended";
     if (typeof user.save === "function") {
       await user.save();
     } else {
-      await User.updateOne({ _id: id }, { $set: { accountStatus: "suspended" } });
+      await User.updateOne({ _id: uid }, { $set: { accountStatus: "suspended" } });
     }
 
     return res.json({
@@ -258,7 +262,7 @@ exports.deleteUser = asyncHandler(async (req, res) => {
     });
   }
 
-  await User.findByIdAndDelete(id);
+  await User.findByIdAndDelete(uid);
 
   return res.json({
     success: true,
@@ -292,13 +296,13 @@ exports.getAllProviders = asyncHandler(async (req, res) => {
 exports.updateProviderApprovalStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { decision, isApproved, accountStatus, approvalStatus } = req.body;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({
       success: false,
       message: "Invalid provider ID"
     });
   }
+  const uid = id.trim();
 
   const hasDecision = typeof decision === "string";
   const hasExplicitApproval = typeof isApproved === "boolean";
@@ -316,15 +320,13 @@ exports.updateProviderApprovalStatus = asyncHandler(async (req, res) => {
     });
   }
 
-  const provider = await User.findById(id).select("-password");
-
+  const provider = await User.findById(uid).select("-password");
   if (!provider || provider.role !== "provider") {
     return res.status(404).json({
       success: false,
       message: "Provider not found"
     });
   }
-
   const approvedFromDecision = hasDecision ? decision === "approve" : null;
   const nextIsApproved = hasExplicitApproval ? isApproved : approvedFromDecision;
 
@@ -381,22 +383,20 @@ exports.rejectProvider = asyncHandler(async (req, res) => {
 exports.updateProviderAccountStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { accountStatus } = req.body;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!isValidUserId(id)) {
     return res.status(400).json({
       success: false,
       message: "Invalid provider ID"
     });
   }
-
+  const uid = id.trim();
   if (!["active", "suspended"].includes(accountStatus)) {
     return res.status(400).json({
       success: false,
       message: "accountStatus must be either 'active' or 'suspended'"
     });
   }
-
-  const provider = await User.findById(id).select("-password");
+  const provider = await User.findById(uid).select("-password");
 
   if (!provider || provider.role !== "provider") {
     return res.status(404).json({
@@ -431,8 +431,8 @@ exports.getAllServicesAdmin = asyncHandler(async (req, res) => {
     filter.category = category.trim();
   }
 
-  if (typeof providerId === "string" && mongoose.Types.ObjectId.isValid(providerId)) {
-    filter.providerId = providerId;
+  if (typeof providerId === "string" && providerId.trim()) {
+    filter.providerId = providerId.trim();
   }
 
   if (typeof status === "string" && ["active", "removed", "available", "unavailable"].includes(status)) {

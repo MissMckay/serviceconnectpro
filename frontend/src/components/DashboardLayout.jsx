@@ -1,39 +1,46 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useContext } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
 import { canProviderCreateServices } from "../utils/providerAccess";
+import TopbarUserMenu from "./TopbarUserMenu";
 
 const navItemsByRole = {
   user: [
     { to: "/user", label: "Services" },
     { to: "/my-bookings", label: "My Bookings" },
-    { to: "/user?view=profile", label: "Profile" }
+    { to: "/messages", label: "Messages" }
   ],
   provider: [
     { to: "/provider?view=dashboard", label: "My Dashboard" },
     { to: "/provider?view=add", label: "Add Service" },
     { to: "/provider?view=manage", label: "Manage My Services" },
-    { to: "/provider?view=bookings", label: "Booking Requests" }
+    { to: "/provider?view=bookings", label: "Booking Requests" },
+    { to: "/messages", label: "Messages" },
+    { to: "/provider?view=settings", label: "Settings" }
   ],
   admin: [
     { to: "/admin?view=overview", label: "Overview" },
     { to: "/admin?view=users", label: "Manage Users" },
     { to: "/admin?view=services", label: "Services" },
-    { to: "/admin?view=reports", label: "View Reports" }
+    { to: "/admin?view=reports", label: "View Reports" },
+    { to: "/admin?view=create-admin", label: "Create admin" }
   ]
 };
 
 const DashboardLayout = ({ role, children }) => {
-  const navigate = useNavigate();
   const location = useLocation();
+  const { user: contextUser } = useContext(AuthContext);
   const safeRole = String(role || "").toLowerCase();
   const storedUser = (() => {
     try {
-      return JSON.parse(localStorage.getItem("user") || "{}");
+      return JSON.parse(sessionStorage.getItem("user") || "{}");
     } catch {
       return {};
     }
   })();
+  const providerUser = contextUser || storedUser;
   const navItems =
-    safeRole === "provider" && !canProviderCreateServices(storedUser)
+    safeRole === "provider" && !canProviderCreateServices(providerUser)
       ? navItemsByRole.provider.filter((item) => item.to !== "/provider?view=add")
       : navItemsByRole[safeRole] || [];
   const showSidebar = safeRole === "user" || safeRole === "provider" || safeRole === "admin";
@@ -49,12 +56,11 @@ const DashboardLayout = ({ role, children }) => {
       if (to === "/my-bookings") {
         return currentPath === "/my-bookings" || (currentPath === "/user" && currentView === "bookings");
       }
-      if (to === "/user?view=profile") {
-        return currentPath === "/user" && currentView === "profile";
-      }
+      if (to === "/messages") return currentPath === "/messages";
     }
 
     if (safeRole === "provider") {
+      if (to === "/messages") return currentPath === "/messages";
       const [targetPath, targetQuery = ""] = to.split("?");
       const targetView = new URLSearchParams(targetQuery).get("view") || "dashboard";
       const activeView = currentView || "dashboard";
@@ -71,12 +77,12 @@ const DashboardLayout = ({ role, children }) => {
     return currentPath === to;
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("user");
-    navigate("/login");
-  };
+  const dashboardTitle =
+    safeRole === "admin"
+      ? null
+      : safeRole === "user"
+        ? "User Dashboard"
+        : null;
 
   return (
     <div className={`protected-layout role-${safeRole || "guest"}`}>
@@ -85,51 +91,24 @@ const DashboardLayout = ({ role, children }) => {
           ServiceConnect
         </Link>
 
-        {safeRole === "provider" ? (
-          <div className="protected-topbar-links provider-topbar-right" aria-label="Provider topbar actions">
-            <span className="provider-topbar-title">Service Provider Dashboard</span>
-            <button type="button" className="protected-logout-btn" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        ) : safeRole === "admin" ? (
-          <div className="protected-topbar-links provider-topbar-right" aria-label="Admin topbar actions">
-            <span className="provider-topbar-title">Admin Dashboard</span>
-            <button type="button" className="protected-logout-btn" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        ) : safeRole === "user" ? (
-          <div className="protected-topbar-links" aria-label="User topbar actions">
-            <span className="provider-topbar-title">
-              User Dashboard
-            </span>
-            <button type="button" className="protected-logout-btn" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        ) : (
-          <nav className="protected-topbar-links" aria-label="Top navigation">
-            {navItems.map((item) => (
-              <Link
-                key={`top-${item.to}`}
-                to={item.to}
-                className={`protected-nav-link${isNavItemActive(item.to) ? " active" : ""}`}
-              >
-                {item.label}
-              </Link>
-            ))}
-            <button type="button" className="protected-logout-btn" onClick={handleLogout}>
-              Logout
-            </button>
-          </nav>
+        {dashboardTitle && (
+          <span className="provider-topbar-title">{dashboardTitle}</span>
         )}
+
+        <div className="protected-topbar-right">
+          <Link to="/services" className="protected-topbar-services-link">
+            Services
+          </Link>
+          <TopbarUserMenu variant="protected" />
+        </div>
       </header>
 
       <div className="protected-body">
         {showSidebar && (
           <aside className="protected-sidebar" aria-label="Sidebar navigation">
-            {safeRole !== "provider" && <div className="protected-sidebar-title">Dashboard Menu</div>}
+            <div className="protected-sidebar-title">
+              {safeRole === "provider" ? "Menu" : "Dashboard Menu"}
+            </div>
             <nav className="protected-sidebar-nav">
               {navItems.map((item) => (
                 <Link

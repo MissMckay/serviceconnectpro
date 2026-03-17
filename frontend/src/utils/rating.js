@@ -16,3 +16,20 @@ export const formatStars = (value) => {
     createElement("span", { className: "rating-stars-empty" }, "☆".repeat(5 - full))
   );
 };
+
+/** Compute average rating and count from service.reviews array */
+export const getAverageRatingAndCount = (service) => {
+  const reviews = Array.isArray(service?.reviews) ? service.reviews : [];
+  if (reviews.length === 0) return { average: 0, count: 0 };
+  let sum = 0;
+  let rated = 0;
+  reviews.forEach((r) => {
+    const n = Number(r?.rating);
+    if (Number.isFinite(n) && n >= 0) {
+      sum += n;
+      rated += 1;
+    }
+  });
+  const average = rated > 0 ? sum / rated : 0;
+  return { average, count: reviews.length };
+};

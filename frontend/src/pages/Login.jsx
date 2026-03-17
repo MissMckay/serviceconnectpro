@@ -51,10 +51,10 @@ const Login = () => {
         "user";
       const normalizedRole = String(role).toLowerCase();
 
-      localStorage.setItem("token", token);
-      localStorage.setItem("role", normalizedRole);
+      sessionStorage.setItem("token", token);
+      sessionStorage.setItem("role", normalizedRole);
       if (res.data.user) {
-        localStorage.setItem("user", JSON.stringify(res.data.user));
+        sessionStorage.setItem("user", JSON.stringify(res.data.user));
       }
 
       alert("Login Successful!");

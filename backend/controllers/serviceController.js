@@ -104,8 +104,9 @@ const normalizeServiceImages = (imagesInput) => {
 };
 
 exports.createService = asyncHandler(async (req, res) => {
-  const { serviceName, category, description, price, availabilityStatus } = req.body;
-  const provider = await User.findById(req.user.id).select("role isApproved accountStatus");
+  const { serviceName, category, description, price, availabilityStatus, providerName, providerAddress, providerProfilePhoto } = req.body;
+  const providerQuery = User.findById(String(req.user.id)).select("role isApproved accountStatus name providerAddress profilePhoto");
+  const provider = typeof providerQuery.lean === "function" ? await providerQuery.lean() : await providerQuery;
 
   if (
     !provider ||
@@ -151,7 +152,13 @@ exports.createService = asyncHandler(async (req, res) => {
       ? availabilityStatus
       : "Available",
     images: normalizedImages,
-    providerId: req.user.id
+    thumbnailUrl: Array.isArray(normalizedImages) && normalizedImages[0]?.imageUrl
+      ? normalizedImages[0].imageUrl
+      : "",
+    providerId: String(req.user.id),
+    providerName: (typeof providerName === "string" && providerName.trim()) ? providerName.trim() : (provider.name || ""),
+    providerAddress: (typeof providerAddress === "string" && providerAddress.trim()) ? providerAddress.trim() : (provider.providerAddress || ""),
+    providerProfilePhoto: (typeof providerProfilePhoto === "string" && providerProfilePhoto.trim()) ? providerProfilePhoto.trim() : (provider.profilePhoto || ""),
   });
 
   res.status(201).json({
@@ -160,41 +167,105 @@ exports.createService = asyncHandler(async (req, res) => {
   });
 });
 
+// In-memory cache for services list to make repeat loads / retries instant (TTL 5s)
+const listCache = new Map();
+const LIST_CACHE_TTL_MS = 5000;
+
+const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "") =>
+  `${page}|${limit}|${category}|${minPrice}|${maxPrice}|${location}`;
+
 exports.getAllServices = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
   const skip = (page - 1) * limit;
+  const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
+  const minPrice = parseInt(req.query.minPrice, 10);
+  const maxPrice = parseInt(req.query.maxPrice, 10);
+  const location = typeof req.query.location === "string" ? req.query.location.trim().toLowerCase() : "";
+  const cacheKey = getCacheKey(page, limit, category, minPrice, maxPrice, location);
 
-  const services = await Service.find({ moderationStatus: { $ne: "removed" } })
-    .populate("providerId", "name phone providerAddress")
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+  const cached = listCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json(cached.payload);
+  }
 
-  res.json({
-    success: true,
-    data: services
-  });
+  try {
+    const filter = { moderationStatus: { $ne: "removed" } };
+    if (category && category !== "All") filter.category = category;
+    if (Number.isFinite(minPrice) && minPrice >= 0) filter.price = { ...(filter.price || {}), $gte: minPrice };
+    if (Number.isFinite(maxPrice) && maxPrice >= 0) filter.price = { ...(filter.price || {}), $lte: maxPrice };
+    if (location) filter.providerAddress = { $regex: location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+
+    const fetchLimit = limit + 1;
+    const rawServices = await Service.find(filter)
+      .select("serviceName category description price availabilityStatus images thumbnailUrl providerId providerName providerAddress providerProfilePhoto averageRating reviewsCount createdAt")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(fetchLimit)
+      .lean();
+
+    const hasMore = rawServices.length > limit;
+    const list = rawServices.slice(0, limit);
+
+    // Trim to first image per service for list to keep payload small
+    const services = list.map((s) =>
+      s && Array.isArray(s.images) && s.images.length > 1
+        ? { ...s, images: [s.images[0]] }
+        : s
+    );
+
+    const totalPages = hasMore ? page + 1 : page;
+    const total = (page - 1) * limit + services.length + (hasMore ? 1 : 0);
+
+    const payload = {
+      success: true,
+      data: services,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, totalPages),
+        hasNextPage: hasMore
+      }
+    };
+
+    listCache.set(cacheKey, { payload, expiresAt: Date.now() + LIST_CACHE_TTL_MS });
+    // Keep cache size bounded
+    if (listCache.size > 50) {
+      const firstKey = listCache.keys().next().value;
+      if (firstKey !== undefined) listCache.delete(firstKey);
+    }
+
+    res.json(payload);
+  } catch (err) {
+    console.error("getAllServices error:", err);
+    res.status(200).json({
+      success: true,
+      data: [],
+      pagination: {
+        page: 1,
+        limit,
+        total: 0,
+        totalPages: 1,
+        hasNextPage: false
+      }
+    });
+  }
 });
 
 exports.getServiceById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!id) {
     const error = new Error("Invalid service ID");
     error.statusCode = 400;
     throw error;
   }
-
-  const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } })
-    .populate("providerId", "name phone providerAddress");
-
+  const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } }).lean();
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;
     throw error;
   }
-
   res.json({
     success: true,
     data: service
@@ -203,22 +274,18 @@ exports.getServiceById = asyncHandler(async (req, res) => {
 
 exports.updateService = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!id) {
     const error = new Error("Invalid service ID");
     error.statusCode = 400;
     throw error;
   }
-
   const service = await Service.findById(id);
-
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;
     throw error;
   }
-
-  if (service.providerId.toString() !== req.user.id) {
+  if (String(service.providerId) !== String(req.user.id)) {
     const error = new Error("Not authorized to update this service");
     error.statusCode = 403;
     throw error;
@@ -267,22 +334,18 @@ exports.updateService = asyncHandler(async (req, res) => {
 
 exports.deleteService = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
+  if (!id) {
     const error = new Error("Invalid service ID");
     error.statusCode = 400;
     throw error;
   }
-
   const service = await Service.findById(id);
-
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;
     throw error;
   }
-
-  if (service.providerId.toString() !== req.user.id) {
+  if (String(service.providerId) !== String(req.user.id)) {
     const error = new Error("Not authorized to delete this service");
     error.statusCode = 403;
     throw error;

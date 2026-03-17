@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const verifyToken = require("../middleware/authMiddleware");
-const { getCurrentUser, getUserById } = require("../controllers/userLookupController");
+const { getCurrentUser, getUserById, updateCurrentUser } = require("../controllers/userLookupController");
 
-router.get("/me", verifyToken, getCurrentUser);
+router.route("/me")
+  .get(verifyToken, getCurrentUser)
+  .patch(verifyToken, updateCurrentUser);
 router.get("/:id", getUserById);
 
 module.exports = router;

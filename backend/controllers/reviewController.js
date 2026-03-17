@@ -6,15 +6,13 @@ const { reviewSchema } = require("../validation/reviewValidation");
 
 const recalculateServiceAverageRating = async (serviceId) => {
   const reviews = await Review.find({ serviceId }).select("rating");
-
-  if (!reviews.length) {
+  const count = reviews.length;
+  if (!count) {
     await Service.findByIdAndUpdate(serviceId, { averageRating: 0 });
     return 0;
   }
-
-  const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+  const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / count;
   const roundedAverage = Number(avg.toFixed(1));
-
   await Service.findByIdAndUpdate(serviceId, { averageRating: roundedAverage });
   return roundedAverage;
 };
@@ -37,7 +35,7 @@ exports.createReview = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  if (booking.userId.toString() !== req.user.id) {
+  if (String(booking.userId) !== String(req.user.id)) {
     const error = new Error("Not authorized");
     error.statusCode = 403;
     throw error;
@@ -102,7 +100,7 @@ exports.deleteReview = asyncHandler(async (req, res) => {
   }
 
   const isAdmin = req.user.role === "admin";
-  const isOwner = review.userId.toString() === req.user.id;
+  const isOwner = String(review.userId) === String(req.user.id);
 
   if (!isAdmin && !isOwner) {
     const error = new Error("Not authorized");
@@ -121,14 +119,18 @@ exports.deleteReview = asyncHandler(async (req, res) => {
 });
 
 exports.getServiceReviews = asyncHandler(async (req, res) => {
-  const reviews = await Review.find({
-    serviceId: req.params.serviceId
-  })
-    .sort({ createdAt: -1 })
-    .populate("userId", "name");
-
   res.json({
     success: true,
-    data: reviews
+    data: await Review.find({ serviceId: req.params.serviceId })
+      .sort({ createdAt: -1 })
+      .populate("userId", "name")
   });
+});
+
+exports.getReviewByBooking = asyncHandler(async (req, res) => {
+  const { bookingId } = req.params;
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ message: "Authentication required" });
+  const review = await Review.findOne({ bookingId, userId }).lean();
+  res.json({ success: true, data: review });
 });

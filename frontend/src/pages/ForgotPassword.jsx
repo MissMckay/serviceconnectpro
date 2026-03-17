@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import { Link } from "react-router-dom";
-import API from "../services/api";
+import { AuthContext } from "../context/AuthContext";
 
 const ForgotPassword = () => {
+  const { resetPassword } = useContext(AuthContext);
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -15,11 +16,11 @@ const ForgotPassword = () => {
     setIsSubmitting(true);
 
     try {
-      await API.post("/auth/forgot-password", { email: email.trim() });
+      await resetPassword(email.trim());
       setSuccess("If this email exists, a password reset link has been sent.");
     } catch (err) {
       setError(
-        err.response?.data?.message ||
+        err?.message ||
         "Unable to send reset email right now. Please try again."
       );
     } finally {

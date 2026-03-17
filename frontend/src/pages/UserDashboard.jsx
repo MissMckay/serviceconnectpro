@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import API from "../services/api";
+import { AuthContext } from "../context/AuthContext";
+import { getServices, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
-import { formatStars } from "../utils/rating";
-import { getServiceMedia } from "../utils/serviceMedia";
+import { formatStars, getAverageRatingAndCount } from "../utils/rating";
+import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
+import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const UserDashboard = () => {
   const navigate = useNavigate();
@@ -34,46 +36,44 @@ const UserDashboard = () => {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
 
-  const user = useMemo(() => {
+  const { user, refreshProfile } = useContext(AuthContext);
+
+  const readFileAsDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error(`Unable to read file ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+
+  const handleProfilePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) {
+      if (file) setProfileError("Please select an image file (e.g. JPG, PNG).");
+      event.target.value = "";
+      return;
+    }
     try {
-      return JSON.parse(localStorage.getItem("user")) || {};
+      const dataUrl = await readFileAsDataUrl(file);
+      if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: dataUrl });
+      await refreshProfile();
+      setProfileData((prev) => (prev ? { ...prev, profilePhoto: dataUrl } : null));
+      setProfileError("");
     } catch (err) {
-      return {};
+      setProfileError(err?.message || "Failed to update profile photo.");
     }
-  }, []);
+    event.target.value = "";
+  };
 
-  const decodeJwtPayload = (token) => {
-    if (!token || typeof token !== "string") return null;
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+  const handleRemoveProfilePhoto = async () => {
     try {
-      const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      return JSON.parse(atob(payload));
-    } catch {
-      return null;
+      if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: "" });
+      await refreshProfile();
+      setProfileData((prev) => (prev ? { ...prev, profilePhoto: "" } : null));
+      setProfileError("");
+    } catch (err) {
+      setProfileError(err?.message || "Failed to remove profile photo.");
     }
-  };
-
-  const getFirstSuccessful = async (paths) => {
-    for (const path of paths) {
-      try {
-        const res = await API.get(path);
-        return res;
-      } catch {
-        // try next endpoint
-      }
-    }
-    return null;
-  };
-
-  const extractUserFromResponse = (res) => {
-    const data = res?.data;
-    if (data?.data && !Array.isArray(data.data)) return data.data;
-    if (data?.user && !Array.isArray(data.user)) return data.user;
-    if (data && !Array.isArray(data) && typeof data === "object" && !data.data && !data.user) {
-      return data;
-    }
-    return null;
   };
 
   const getServiceLocation = (service) => getServiceSearchLocations(service)[0] || "";
@@ -132,64 +132,52 @@ const UserDashboard = () => {
     getServiceLocation(service) ||
     "Not provided";
 
+  const getProviderInitials = (name) => {
+    const n = (name || "").trim();
+    if (!n) return "?";
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
+    return n.slice(0, 2).toUpperCase();
+  };
+
+  const getProviderPhoto = (service) =>
+    service?.providerProfilePhoto ||
+    service?.providerId?.profilePhoto ||
+    service?.provider?.profilePhoto ||
+    service?.createdBy?.profilePhoto ||
+    "";
+
+  const formatPhoneForWhatsApp = (phone) => {
+    const p = (phone || "").replace(/\D/g, "");
+    return p ? p : null;
+  };
+
+  const getWhatsAppUrl = (phone) => {
+    const num = formatPhoneForWhatsApp(phone);
+    if (!num) return null;
+    const text = encodeURIComponent("Hi, I'm interested in your service.");
+    return `https://wa.me/${num}?text=${text}`;
+  };
+
   const normalizeText = (value) =>
     String(value || "")
       .trim()
       .toLowerCase();
 
-  const fetchServices = async () => {
+  const fetchServicesForDashboard = async () => {
     setIsLoading(true);
     setError("");
     try {
-      const params = {};
-      if (filters.category !== "All") params.category = filters.category;
-      if (filters.location.trim() !== "") params.location = filters.location.trim();
-
-      const res = await API.get("/services", {
-        params: { ...params, _ts: Date.now() }
+      const serviceList = await getServices({
+        category: filters.category,
+        location: filters.location.trim(),
+        minPrice: "",
+        maxPrice: "",
       });
-      const serviceList = Array.isArray(res.data?.data) ? res.data.data : [];
-
-      const reviewsByService = await Promise.all(
-        serviceList.map((service) =>
-          API.get(`/reviews/service/${service._id}`)
-            .then((reviewRes) => ({
-              serviceId: service._id,
-              reviews: Array.isArray(reviewRes.data?.data) ? reviewRes.data.data : []
-            }))
-            .catch(() => ({
-              serviceId: service._id,
-              reviews: []
-            }))
-        )
-      );
-
-      const reviewMap = new Map(
-        reviewsByService.map((entry) => [String(entry.serviceId), entry.reviews])
-      );
-
-      const merged = serviceList.map((service) => {
-        const fetchedReviews = reviewMap.get(String(service._id)) || [];
-        const embeddedReviews = Array.isArray(service?.reviews)
-          ? service.reviews
-          : Array.isArray(service?.comments)
-            ? service.comments
-            : [];
-        return {
-          ...service,
-          reviews: fetchedReviews.length ? fetchedReviews : embeddedReviews
-        };
-      });
-
-      setServices(merged);
+      setServices(serviceList);
     } catch (err) {
-      console.log("Error fetching services:", err);
       setServices([]);
-      if (!err.response) {
-        setError("Cannot reach backend API. Verify your backend server is running and the Vite proxy target is correct.");
-      } else {
-        setError(err.response?.data?.message || "Failed to load services.");
-      }
+      setError(err?.message || "Failed to load services.");
     } finally {
       setIsLoading(false);
     }
@@ -199,69 +187,22 @@ const UserDashboard = () => {
     typeof value === "string" && /^[a-fA-F0-9]{24}$/.test(value);
 
   useEffect(() => {
-    fetchServices();
+    fetchServicesForDashboard();
   }, [filters.category, filters.location]);
 
   useEffect(() => {
-    const handleServiceUpdates = () => {
-      fetchServices();
-    };
-
-    const handleStorage = (event) => {
-      if (event.key === "services:lastUpdatedAt") {
-        fetchServices();
-      }
-    };
-
+    const handleServiceUpdates = () => fetchServicesForDashboard();
     window.addEventListener("services:updated", handleServiceUpdates);
-    window.addEventListener("storage", handleStorage);
-
-    return () => {
-      window.removeEventListener("services:updated", handleServiceUpdates);
-      window.removeEventListener("storage", handleStorage);
-    };
+    return () => window.removeEventListener("services:updated", handleServiceUpdates);
   }, [filters.category, filters.location]);
 
   useEffect(() => {
     if (activeView !== "profile") return;
 
-    const loadProfile = async () => {
-      setProfileLoading(true);
-      setProfileError("");
-      try {
-        const token = localStorage.getItem("token");
-        const decoded = decodeJwtPayload(token);
-        const userId =
-          user?._id ||
-          user?.id ||
-          decoded?._id ||
-          decoded?.id ||
-          decoded?.userId ||
-          decoded?.user?._id ||
-          decoded?.user?.id;
-
-        const candidatePaths = ["/users/me"];
-        if (isValidObjectId(userId)) {
-          candidatePaths.push(`/users/${userId}`);
-          candidatePaths.push(`/auth/users/${userId}`);
-        }
-
-        const res = await getFirstSuccessful(candidatePaths);
-        const payload = extractUserFromResponse(res);
-        const nextProfile = payload || user || {};
-
-        setProfileData(nextProfile);
-        localStorage.setItem("user", JSON.stringify(nextProfile));
-      } catch {
-        setProfileData(user || {});
-        setProfileError("Could not refresh profile from server. Showing saved profile.");
-      } finally {
-        setProfileLoading(false);
-      }
-    };
-
-    loadProfile();
-  }, [activeView]);
+    setProfileData(user || {});
+    setProfileError("");
+    setProfileLoading(false);
+  }, [activeView, user]);
 
   useEffect(() => {
     setActiveView(getViewFromSearch(location.search));
@@ -321,7 +262,8 @@ const UserDashboard = () => {
       "createdAt",
       "updatedAt",
       "token",
-      "refreshToken"
+      "refreshToken",
+      "profilePhoto"
     ]);
 
     return Object.entries(source)
@@ -387,106 +329,115 @@ const UserDashboard = () => {
                 {!error && (
                   <div className="dashboard-grid">
                     {filteredServices.map((service) => {
-                      const media = getServiceMedia(service);
-                      const images = media.map((entry) => entry.url).slice(0, 3);
-                      const reviews = Array.isArray(service?.reviews) ? service.reviews : [];
-                      const sortedReviews = [...reviews].sort(
-                        (a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)
-                      );
-                      const previewReviews = sortedReviews.slice(0, 2);
+                      const firstImageUrl = getFirstServiceImageUrl(service);
+                      const providerPhoto = getProviderPhoto(service);
+                      const { average: embeddedAvg, count: embeddedCount } = getAverageRatingAndCount(service);
+                      const displayRating = Number.isFinite(Number(service?.averageRating))
+                        ? Number(service.averageRating)
+                        : embeddedAvg;
+                      const reviewCount = Number.isFinite(Number(service?.reviewsCount))
+                        ? Number(service.reviewsCount)
+                        : embeddedCount;
+                      const description = service?.description || "";
+                      const DESCRIPTION_PREVIEW_LENGTH = 110;
+                      const truncatedDesc =
+                        description.length > DESCRIPTION_PREVIEW_LENGTH
+                          ? `${description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
+                          : description;
+                      const providerName = getProviderName(service);
+                      const providerPhone = getProviderPhone(service);
+                      const location = getServiceLocation(service) || getProviderAddress(service);
+                      const locationDisplay = location && location !== "Not provided" ? location : "";
+                      const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
                       return (
-                        <div key={service._id} className="service-card">
-                          <div className="service-card-media">
-                            {images.length ? (
-                              <div className="service-card-media-grid">
-                                {images.map((image, index) => (
-                                  <img key={`${service._id}-media-${index}`} src={image} alt={service.serviceName} />
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="service-card-placeholder">
-                                No image uploaded
-                              </div>
-                            )}
-                          </div>
-                          <div className="service-card-body">
-                            <div className="service-card-title">{service.serviceName}</div>
-                            <div className="service-card-meta">
-                              <strong>Provider Name:</strong> {getProviderName(service)}
+                        <article key={service._id} className="sc-card">
+                          <div className="sc-card__image-wrap">
+                            {firstImageUrl ? (
+                              <img
+                                src={firstImageUrl}
+                                alt={service.serviceName || "Service"}
+                                className="sc-card__image"
+                                loading="lazy"
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.style.display = "none";
+                                  const wrap = e.target.parentElement;
+                                  const ph = wrap?.querySelector(".sc-card__image-placeholder");
+                                  if (ph) ph.style.display = "flex";
+                                }}
+                              />
+                            ) : null}
+                            <div className="sc-card__image-placeholder" style={{ display: firstImageUrl ? "none" : "flex" }}>
+                              No photo
                             </div>
-                            <div className="service-card-meta">
-                              <strong>Provider Phone:</strong> {getProviderPhone(service)}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Provider Address:</strong> {getProviderAddress(service)}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Category:</strong> {service?.category || "General"}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Description:</strong>{" "}
-                              {service?.description || "Not provided"}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Price:</strong> {formatLrdPrice(service?.price)}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Status:</strong>{" "}
-                              {service?.availabilityStatus || "Not provided"}
-                            </div>
-                            <div className="service-card-meta">
-                              <strong>Average Rating:</strong>{" "}
-                              {formatStars(service?.averageRating)}
-                            </div>
-                            {getServiceLocation(service) && (
-                              <div className="service-card-meta">
-                                <strong>Location:</strong> {getServiceLocation(service)}
-                              </div>
-                            )}
-
-                            <div className="service-card-actions">
-                              <button
-                                type="button"
-                                className="service-card-btn"
-                                onClick={() => setSelectedServiceId(service._id)}
-                              >
-                                Review
-                              </button>
-                            </div>
-
-                            <div className="service-card-reviews">
-                              <div className="service-card-reviews-title">
-                                Recent Reviews
-                              </div>
-                              {previewReviews.length === 0 ? (
-                                <p>No reviews yet.</p>
+                            <span className="sc-card__provider-badge" title={providerName}>
+                              {providerPhoto ? (
+                                <img src={providerPhoto} alt={providerName} className="sc-card__provider-avatar" />
                               ) : (
-                                previewReviews.map((review, index) => (
-                                  <div
-                                    key={review?._id || `${service._id}-preview-${index}`}
-                                    className="service-card-review"
-                                  >
-                                    <div className="service-card-review-name">
-                                      {typeof review === "string"
-                                        ? "Anonymous"
-                                        : getReviewerName(review)}
-                                    </div>
-                                    {typeof review !== "string" && (
-                                      <div className="service-card-review-comment">
-                                        {formatStars(review?.rating)}
-                                      </div>
-                                    )}
-                                    <div className="service-card-review-comment">
-                                      {typeof review === "string"
-                                        ? review
-                                        : review?.comment || "No comment provided."}
-                                    </div>
-                                  </div>
-                                ))
+                                getProviderInitials(providerName)
+                              )}
+                            </span>
+                          </div>
+                          <div className="sc-card__content">
+                            <div className="sc-card__tags">
+                              <span className="sc-card__tag sc-card__tag--category">
+                                {service?.category || "General"}
+                              </span>
+                              <span className={`sc-card__tag sc-card__tag--status ${isAvailable ? "sc-card__tag--available" : "sc-card__tag--unavailable"}`}>
+                                {service?.availabilityStatus || "—"}
+                              </span>
+                            </div>
+                            <h3 className="sc-card__title">{service.serviceName}</h3>
+                            {truncatedDesc && <p className="sc-card__desc">{truncatedDesc}</p>}
+                            <div className="sc-card__provider">
+                              <span className="sc-card__provider-name">{providerName}</span>
+                              {locationDisplay && (
+                                <span className="sc-card__provider-location" title={locationDisplay}>
+                                  {locationDisplay.length > 30 ? `${locationDisplay.slice(0, 30)}…` : locationDisplay}
+                                </span>
                               )}
                             </div>
+                            <div className="sc-card__bottom">
+                              <div className="sc-card__price-rating">
+                                <span className="sc-card__price">{formatLrdPrice(service?.price)}</span>
+                                <span className="sc-card__rating">
+                                  {formatStars(displayRating)}
+                                  {displayRating > 0 && <em className="sc-card__rating-num">{Number(displayRating).toFixed(1)}</em>}
+                                  {reviewCount > 0 && <span className="sc-card__rating-count">({reviewCount})</span>}
+                                </span>
+                              </div>
+                              <div className="sc-card__actions">
+                                <button
+                                  type="button"
+                                  className="sc-card__btn sc-card__btn--secondary"
+                                  onClick={() => navigate(`/services/${service._id}`, { state: { service } })}
+                                >
+                                  View details
+                                </button>
+                                <button
+                                  type="button"
+                                  className="sc-card__btn sc-card__btn--primary"
+                                  onClick={() => navigate(`/book/${service._id}`)}
+                                  disabled={!isAvailable}
+                                >
+                                  Book Now
+                                </button>
+                                {getWhatsAppUrl(providerPhone) && (
+                                  <a
+                                    href={getWhatsAppUrl(providerPhone)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="sc-card__whatsapp"
+                                    title="Chat on WhatsApp"
+                                    aria-label="Chat on WhatsApp"
+                                  >
+                                    <WhatsAppIcon size={20} />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        </article>
                       );
                     })}
                   </div>
@@ -618,9 +569,47 @@ const UserDashboard = () => {
           <div className="dashboard-panel">
             <div className="profile-card">
               <div className="profile-card-title">User Profile</div>
+
+              <div className="provider-profile-photo-section">
+                <span className="provider-profile-photo-label">Profile photo</span>
+                <p className="profile-photo-detail">This photo appears in the top navigation bar.</p>
+                <div className="provider-profile-photo-box">
+                  <div className="provider-profile-photo-preview">
+                    {(profileData || user)?.profilePhoto ? (
+                      <img src={(profileData || user).profilePhoto} alt="Profile" />
+                    ) : (
+                      <span className="provider-profile-photo-placeholder">
+                        {String((profileData || user)?.name || "U").trim().slice(0, 2).toUpperCase() || "?"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="provider-profile-photo-actions">
+                    <label className="provider-profile-photo-btn provider-profile-photo-upload">
+                      Change photo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleProfilePhotoChange}
+                        aria-label="Upload profile photo"
+                      />
+                    </label>
+                    {(profileData || user)?.profilePhoto && (
+                      <button
+                        type="button"
+                        className="provider-profile-photo-btn provider-profile-photo-remove"
+                        onClick={handleRemoveProfilePhoto}
+                        title="Remove your profile photo. Your initials will show in the nav bar instead."
+                      >
+                        Remove photo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {profileLoading && <p>Loading profile...</p>}
               {!profileLoading && profileError && <p className="dashboard-error">{profileError}</p>}
-              {!profileLoading && profileEntries.length === 0 && <p>No profile details found.</p>}
+              {!profileLoading && profileEntries.length === 0 && !profileError && <p>No profile details found.</p>}
               {!profileLoading &&
                 profileEntries.map((entry) => (
                   <div className="profile-row" key={entry.label}>

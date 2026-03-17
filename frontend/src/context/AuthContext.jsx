@@ -1,33 +1,138 @@
-import { createContext, useState, useEffect } from "react";
-import { loginUser, registerUser } from "../services/authServices";
+import { createContext, useEffect, useState } from "react";
+import API from "../services/api";
 
 export const AuthContext = createContext();
 
+const defaultProfile = {
+  role: "user",
+  accountStatus: "active",
+  isApproved: true,
+  approvalStatus: "approved",
+  phone: "Not provided",
+  providerAddress: "Not provided",
+  profilePhoto: "",
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem("user"));
-    if (storedUser) setUser(storedUser);
+    const load = async () => {
+      const token = sessionStorage.getItem("token");
+      if (!token) {
+        setUser(null);
+        setAuthReady(true);
+        return;
+      }
+      try {
+        const res = await API.get("/users/me");
+        const data = res?.data?.data || res?.data || null;
+        if (data) {
+          setUser({ ...defaultProfile, ...data, uid: data._id || data.id, id: data._id || data.id, _id: data._id || data.id });
+        } else {
+          setUser(null);
+          sessionStorage.removeItem("token");
+        }
+      } catch (e) {
+        setUser(null);
+        sessionStorage.removeItem("token");
+      } finally {
+        setAuthReady(true);
+      }
+    };
+    load();
   }, []);
 
   const login = async (formData) => {
-    const data = await loginUser(formData);
-    localStorage.setItem("user", JSON.stringify(data));
-    setUser(data);
+    const res = await API.post("/auth/login", {
+      email: formData.email,
+      password: formData.password,
+    });
+    const token = res?.data?.token || res?.token;
+    const u = res?.data?.user || res?.user;
+    if (token) sessionStorage.setItem("token", token);
+    if (u) {
+      const uid = u.id || u._id;
+      const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
+      setUser(merged);
+      return merged;
+    }
+    const me = await API.get("/users/me");
+    const data = me?.data?.data || me?.data || null;
+    const uid = data?._id || data?.id;
+    const merged = { ...defaultProfile, ...data, uid, id: uid, _id: uid };
+    setUser(merged);
+    return merged;
   };
 
   const register = async (formData) => {
-    return await registerUser(formData);
+    const res = await API.post("/auth/register", {
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      role: formData.role || "user",
+      phone: formData.phone || "Not provided",
+      providerAddress: formData.providerAddress || "Not provided",
+    });
+    const token = res?.data?.token || res?.token;
+    const u = res?.data?.user || res?.user;
+    if (token) sessionStorage.setItem("token", token);
+    const uid = u?.id || u?._id;
+    const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
+    setUser(merged);
+    return merged;
   };
 
-  const logout = () => {
-    localStorage.removeItem("user");
+  const registerAdmin = async (formData) => {
+    const res = await API.post("/auth/register-admin", {
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      phone: formData.phone || "Not provided",
+    });
+    const token = res?.data?.token || res?.token;
+    const u = res?.data?.user || res?.user;
+    if (token) sessionStorage.setItem("token", token);
+    const uid = u?.id || u?._id;
+    const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
+    setUser(merged);
+    return merged;
+  };
+
+  const logout = async () => {
+    sessionStorage.removeItem("token");
     setUser(null);
   };
 
+  const resetPassword = async (email) => {
+    throw new Error("Password reset is not implemented on the backend yet.");
+  };
+
+  const refreshProfile = async () => {
+    try {
+      const res = await API.get("/users/me");
+      const data = res?.data?.data || res?.data || null;
+      const uid = data?._id || data?.id;
+      setUser({ ...defaultProfile, ...data, uid, id: uid, _id: uid });
+    } catch (e) {
+      console.error("refreshProfile failed", e);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        authReady,
+        login,
+        register,
+        registerAdmin,
+        logout,
+        resetPassword,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

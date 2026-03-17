@@ -1,12 +1,14 @@
 import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+import "./design-system.css";
 import "./App.css";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
 
-import Login from "./pages/Login";
-import Register from "./pages/Register";
+import AuthPage from "./pages/AuthPage";
 import ForgotPassword from "./pages/ForgotPassword";
+import RegisterAdmin from "./pages/RegisterAdmin";
+import AdminLoginPage from "./pages/AdminLoginPage";
 import ServiceListing from "./pages/ServiceListing";
 import ServiceDetails from "./pages/ServiceDetails";
 import BookingPage from "./pages/BookingPage";
@@ -15,7 +17,7 @@ import ProviderDashboard from "./pages/ProviderDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import UserBookings from "./pages/UserBookings";
-import Auth from "./pages/Auth";
+import MessagesLayout from "./components/MessagesLayout";
 const AppRoutes = () => {
   const location = useLocation();
   const hideNavbar =
@@ -23,8 +25,12 @@ const AppRoutes = () => {
     /^\/review\/[^/]+$/.test(location.pathname) ||
     location.pathname === "/provider" ||
     location.pathname === "/admin" ||
+    location.pathname === "/admin-login" ||
+    location.pathname === "/admin/login" ||
+    location.pathname === "/register-admin" ||
     location.pathname === "/user" ||
-    location.pathname === "/my-bookings";
+    location.pathname === "/my-bookings" ||
+    location.pathname === "/messages";
 
   return (
     <>
@@ -33,8 +39,11 @@ const AppRoutes = () => {
 
         {/* Public Routes */}
         <Route path="/" element={<ServiceListing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
+        <Route path="/register-admin" element={<RegisterAdmin />} />
+        <Route path="/admin-login" element={<AdminLoginPage />} />
+        <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/services" element={<ServiceListing />} />
         <Route path="/services/:id" element={<ServiceDetails />} />
@@ -107,7 +116,15 @@ const AppRoutes = () => {
                   </ProtectedRoute>
               }
           />
-          <Route path="/auth" element={<Auth />} />
+          <Route
+            path="/messages"
+            element={
+              <ProtectedRoute allowedRole={["user", "provider"]}>
+                <MessagesLayout />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/auth" element={<AuthPage />} />
       </Routes>
     </>
   );

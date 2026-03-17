@@ -1,14 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useContext } from "react";
 import { useNavigate } from "react-router-dom";
-import API from "../services/api";
-import { formatStars } from "../utils/rating";
-import { getServiceMedia } from "../utils/serviceMedia";
+import { AuthContext } from "../context/AuthContext";
+import { subscribeServices } from "../firebase/firestoreServices";
+import { formatStars, getAverageRatingAndCount } from "../utils/rating";
+import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
+import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const ServiceListing = () => {
+  const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const role = user ? String(user.role || "").toLowerCase() : "";
+
   const [services, setServices] = useState([]);
-  const [role, setRole] = useState(() => localStorage.getItem("role"));
   const [searchInputs, setSearchInputs] = useState({
     selectedCategory: "All",
     location: "",
@@ -21,133 +26,29 @@ const ServiceListing = () => {
     minPrice: "",
     maxPrice: ""
   });
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
-  const PAGE_SIZE = 6;
-
-  const cardStyle = {
-    border: "1px solid #e3e7ee",
-    borderRadius: "14px",
-    padding: "16px",
-    marginBottom: "14px",
-    background: "var(--bg-white)",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
-  };
-
-  const actionButtonStyle = {
-    border: "none",
-    borderRadius: "12px",
-    padding: "8px 12px",
-    background: "var(--brand-red)",
-    color: "#fff",
-    cursor: "pointer",
-    marginRight: "8px"
-  };
 
   useEffect(() => {
-    const fetchServices = async () => {
-      setIsLoading(true);
-      setError("");
-      try {
-        const params = {
-          page: currentPage,
-          limit: PAGE_SIZE
-        };
-
-        if (appliedFilters.selectedCategory !== "All") {
-          params.category = appliedFilters.selectedCategory;
-        }
-        if (appliedFilters.location.trim() !== "") params.location = appliedFilters.location.trim();
-        if (appliedFilters.minPrice !== "") params.minPrice = appliedFilters.minPrice;
-        if (appliedFilters.maxPrice !== "") params.maxPrice = appliedFilters.maxPrice;
-
-        const res = await API.get("/services", {
-          params: { ...params, _ts: Date.now() }
-        });
-
-        const serviceList = Array.isArray(res.data?.data) ? res.data.data : [];
-        const pagination =
-          res.data?.pagination || res.data?.meta || res.data?.pageInfo || null;
-
-        if (pagination) {
-          const safeTotalPages = Number(pagination.totalPages || pagination.pages || 1);
-          setTotalPages(safeTotalPages > 0 ? safeTotalPages : 1);
-          setHasNextPage(Number(currentPage) < safeTotalPages);
-        } else {
-          setTotalPages(currentPage);
-          setHasNextPage(serviceList.length === PAGE_SIZE);
-        }
-
-        const reviewsByService = await Promise.all(
-          serviceList.map((service) =>
-            API.get(`/reviews/service/${service._id}`)
-              .then((reviewRes) => ({
-                serviceId: service._id,
-                reviews: Array.isArray(reviewRes.data?.data) ? reviewRes.data.data : []
-              }))
-              .catch(() => ({
-                serviceId: service._id,
-                reviews: []
-              }))
-          )
-        );
-
-        const reviewMap = new Map(
-          reviewsByService.map((entry) => [String(entry.serviceId), entry.reviews])
-        );
-
-        const mergedServices = serviceList.map((service) => {
-          const fetchedReviews = reviewMap.get(String(service._id)) || [];
-          const embeddedReviews = Array.isArray(service?.reviews)
-            ? service.reviews
-            : Array.isArray(service?.comments)
-              ? service.comments
-              : [];
-
-          return {
-            ...service,
-            reviews: fetchedReviews.length ? fetchedReviews : embeddedReviews
-          };
-        });
-
-        setServices(mergedServices);
-      } catch (err) {
-        console.log("Error fetching services:", err);
-        setServices([]);
-        setError(err.response?.data?.message || "Failed to load services.");
-      } finally {
+    let unsub;
+    try {
+      unsub = subscribeServices(appliedFilters, (list) => {
+        setServices(list);
+        setError("");
         setIsLoading(false);
-      }
-    };
-
-    const handleStorage = () => {
-      setRole(localStorage.getItem("role"));
-      fetchServices();
-    };
-
-    const handleServiceUpdates = () => {
-      fetchServices();
-    };
-
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("services:updated", handleServiceUpdates);
-    fetchServices();
-
+      });
+    } catch (err) {
+      setServices([]);
+      setError(err?.message || "Failed to load services.");
+      setIsLoading(false);
+    }
     return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("services:updated", handleServiceUpdates);
+      if (typeof unsub === "function") unsub();
     };
-  }, [currentPage, appliedFilters]);
+  }, [appliedFilters]);
 
-  // Booking click handler
   const handleBookingClick = (serviceId) => {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
+    if (!user) {
       navigate("/login");
     } else {
       navigate(`/book/${serviceId}`);
@@ -198,6 +99,26 @@ const ServiceListing = () => {
     getServiceLocation(service) ||
     "Not provided";
 
+  const getProviderInitials = (name) => {
+    const n = (name || "").trim();
+    if (!n) return "?";
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
+    return n.slice(0, 2).toUpperCase();
+  };
+
+  const getProviderPhoto = (service) =>
+    service?.providerProfilePhoto ||
+    service?.providerId?.profilePhoto ||
+    service?.provider?.profilePhoto ||
+    service?.createdBy?.profilePhoto ||
+    "";
+
+  const formatPhoneForWhatsApp = (phone) => {
+    const p = (phone || "").replace(/\D/g, "");
+    return p ? p : null;
+  };
+
   const getReviewerName = (review) =>
     review?.userId?.name ||
     review?.user?.name ||
@@ -228,86 +149,34 @@ const ServiceListing = () => {
     });
   };
 
-  const renderReviews = (service) => {
-    const rawReviews = Array.isArray(service?.reviews)
-      ? service.reviews
-      : Array.isArray(service?.comments)
-        ? service.comments
-        : [];
+  const getWhatsAppUrl = (phone) => {
+    const num = formatPhoneForWhatsApp(phone);
+    if (!num) return null;
+    const text = encodeURIComponent("Hi, I'm interested in your service.");
+    return `https://wa.me/${num}?text=${text}`;
+  };
 
-    const reviews = [...rawReviews].sort(
-      (a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)
-    );
+  const DESCRIPTION_PREVIEW_LENGTH = 110;
 
-    if (reviews.length === 0) {
+  // Single large service image (first image only)
+  const renderMediaPreview = (service) => {
+    const media = getServiceMedia(service) || [];
+    const first = media.find((m) => m?.url);
+
+    if (!first?.url) {
       return (
-        <p style={{ margin: 0 }}>
-          <strong>Reviews:</strong> No reviews yet.
-        </p>
+        <div className="service-card-hero-image service-card-hero-placeholder">
+          No image
+        </div>
       );
     }
 
-    const visibleReviews = reviews.slice(0, 3);
-
     return (
-      <div>
-        <p style={{ margin: "0 0 8px" }}>
-          <strong>Reviews:</strong>
-        </p>
-
-        {visibleReviews.map((review, index) => {
-          const comment = typeof review === "string" ? review : review?.comment;
-          const reviewerName = typeof review === "string" ? "Anonymous" : getReviewerName(review);
-          const reviewerRating = typeof review === "string" ? null : review?.rating;
-          const reviewDate = formatReviewDate(review);
-
-          return (
-            <div
-              key={review?._id || `${service._id}-review-${index}`}
-              style={{ marginBottom: "8px" }}
-            >
-              <div>
-                <strong>{reviewerName}</strong>{" "}
-                {reviewerRating ? formatStars(reviewerRating) : ""}
-              </div>
-
-              {reviewDate && (
-                <div style={{ fontSize: "0.9em", color: "#666" }}>
-                  {reviewDate}
-                </div>
-              )}
-
-              <div>{comment || "No comment provided."}</div>
-            </div>
-          );
-        })}
-
-        {reviews.length > visibleReviews.length && (
-          <p>{reviews.length - visibleReviews.length} more review(s) available.</p>
-        )}
-      </div>
-    );
-  };
-
-  // ✅ Media preview: images first (max 3), displayed BEFORE service name
-  const renderMediaPreview = (service) => {
-    const media = getServiceMedia(service) || [];
-    const imageOnly = media.filter((m) => m?.type === "image" || !m?.type);
-    const preview = imageOnly.slice(0, 3);
-
-    if (!preview.length) {
-      return <p className="service-media-empty">No image uploaded.</p>;
-    }
-
-    return (
-      <div className="service-media-preview">
-        {preview.map((item, index) => (
-          <img
-            key={`${service._id}-preview-${index}`}
-            src={item.url}
-            alt={`${service.serviceName} preview ${index + 1}`}
-          />
-        ))}
+      <div className="service-card-hero-image">
+        <img
+          src={first.url}
+          alt={service.serviceName}
+        />
       </div>
     );
   };
@@ -358,165 +227,265 @@ const ServiceListing = () => {
 
   const handleSearch = (event) => {
     event.preventDefault();
-    setCurrentPage(1);
     setAppliedFilters(searchInputs);
   };
 
   return (
-    <div className="page-shell">
-      <h2>Available Services</h2>
+    <div className="page-shell services-page">
+      <header className="services-page__header">
+        <h1 className="services-page__title">Available Services</h1>
+        <p className="services-page__subtitle">Find and book trusted local services. Filter by category, location, or price.</p>
+      </header>
 
-      <form className="service-listing-search" onSubmit={handleSearch}>
-        <select
-          value={searchInputs.selectedCategory}
-          onChange={(e) =>
-            setSearchInputs((prev) => ({ ...prev, selectedCategory: e.target.value }))
-          }
-        >
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
-        </select>
-
-        <input
-          list="service-location-options"
-          type="text"
-          placeholder="Search location or address"
-          value={searchInputs.location}
-          onChange={(e) => setSearchInputs((prev) => ({ ...prev, location: e.target.value }))}
-        />
-        <datalist id="service-location-options">
-          {locationSuggestions.map((location) => (
-            <option key={location} value={location} />
-          ))}
-        </datalist>
-
-        <input
-          type="number"
-          min="0"
-          placeholder="Min price (optional)"
-          value={searchInputs.minPrice}
-          onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
-        />
-
-        <input
-          type="number"
-          min="0"
-          placeholder="Max price (optional)"
-          value={searchInputs.maxPrice}
-          onChange={(e) => setSearchInputs((prev) => ({ ...prev, maxPrice: e.target.value }))}
-        />
-
-        <button type="submit" style={{ ...actionButtonStyle, marginRight: 0 }}>
-          Search
-        </button>
+      <form className="services-search" onSubmit={handleSearch}>
+        <div className="services-search__field">
+          <label htmlFor="services-category" className="services-search__label">Category</label>
+          <select
+            id="services-category"
+            className="services-search__input"
+            value={searchInputs.selectedCategory}
+            onChange={(e) =>
+              setSearchInputs((prev) => ({ ...prev, selectedCategory: e.target.value }))
+            }
+          >
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-location" className="services-search__label">Location</label>
+          <input
+            id="services-location"
+            list="service-location-options"
+            type="text"
+            className="services-search__input"
+            placeholder="City or area"
+            value={searchInputs.location}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, location: e.target.value }))}
+          />
+          <datalist id="service-location-options">
+            {locationSuggestions.map((location) => (
+              <option key={location} value={location} />
+            ))}
+          </datalist>
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-min-price" className="services-search__label">Min price (LRD)</label>
+          <input
+            id="services-min-price"
+            type="number"
+            min="0"
+            className="services-search__input"
+            placeholder="0"
+            value={searchInputs.minPrice}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
+          />
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-max-price" className="services-search__label">Max price (LRD)</label>
+          <input
+            id="services-max-price"
+            type="number"
+            min="0"
+            className="services-search__input"
+            placeholder="Any"
+            value={searchInputs.maxPrice}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, maxPrice: e.target.value }))}
+          />
+        </div>
+        <div className="services-search__action">
+          <button type="submit" className="services-search__btn">
+            Apply filters
+          </button>
+        </div>
       </form>
 
-      {isLoading && <p>Loading services...</p>}
-      {!isLoading && error && <p style={{ color: "var(--brand-red)" }}>{error}</p>}
+      {isLoading && (
+        <div className="service-listing-loading">
+          <p>Loading services...</p>
+        </div>
+      )}
+      {!isLoading && error && (
+        <div className="service-listing-error">
+          <p style={{ color: "var(--brand-red)" }}>{error}</p>
+          <button
+            type="button"
+            className="service-listing-retry-btn"
+            onClick={() => setIsLoading(true)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-      {!error && (
+      {!isLoading && !error && filteredServices.length > 0 && (
         <div className="service-listing-grid">
-          {filteredServices.map((service) => (
-            <div
-              key={service._id}
-              style={{
-                ...cardStyle,
-                textAlign: "left",
-                width: "100%",
-                marginBottom: 0
-              }}
-            >
-              {/* ✅ Images first */}
-              {renderMediaPreview(service)}
+          {filteredServices.map((service) => {
+            const { average: embeddedAvg, count: embeddedCount } = getAverageRatingAndCount(service);
+            const displayRating = Number.isFinite(Number(service?.averageRating))
+              ? Number(service.averageRating)
+              : embeddedAvg;
+            const reviewCount = Number.isFinite(Number(service?.reviewsCount))
+              ? Number(service.reviewsCount)
+              : embeddedCount;
+            const description = service?.description || "";
+            const truncatedDesc =
+              description.length > DESCRIPTION_PREVIEW_LENGTH
+                ? `${description.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}…`
+                : description;
+            const providerName = getProviderName(service);
+            const providerPhone = getProviderPhone(service);
+            const location = getServiceLocation(service) || getProviderAddress(service);
+            const locationDisplay = location && location !== "Not provided" ? location : "";
+            const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
+            const providerPhoto = getProviderPhoto(service);
+            const firstImageUrl = getFirstServiceImageUrl(service);
 
-              {/* ✅ Service name AFTER images */}
-              <h3 style={{ marginTop: "10px" }}>{service.serviceName}</h3>
-
-              <p>
-                <strong>Provider Name:</strong> {getProviderName(service)}
-              </p>
-
-              <p>
-                <strong>Provider Phone:</strong> {getProviderPhone(service)}
-              </p>
-
-              <p>
-                <strong>Provider Address:</strong> {getProviderAddress(service)}
-              </p>
-
-              <p>
-                <strong>Category:</strong> {service.category}
-              </p>
-
-              <p>
-                <strong>Description:</strong> {service.description}
-              </p>
-
-              <p>
-                <strong>Price:</strong> {formatLrdPrice(service?.price)}
-              </p>
-
-              <p>
-                <strong>Status:</strong> {service.availabilityStatus}
-              </p>
-
-              <p>
-                <strong>Average Rating:</strong>{" "}
-                {formatStars(service.averageRating)}{" "}
-                {Number.isFinite(Number(service.averageRating)) &&
-                  Number(service.averageRating) > 0 && (
-                    <span>({Number(service.averageRating).toFixed(1)})</span>
-                  )}
-              </p>
-
-              <button
-                style={actionButtonStyle}
-                onClick={() => handleReviewClick(service._id, service)}
+            return (
+              <article
+                key={service._id}
+                className="sc-card"
               >
-                Review
-              </button>
+                <div className="sc-card__image-wrap">
+                  {firstImageUrl ? (
+                    <img
+                      src={firstImageUrl}
+                      alt={service.serviceName || "Service"}
+                      className="sc-card__image"
+                      loading="lazy"
+                      decoding="async"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.style.display = "none";
+                        const wrap = e.target.parentElement;
+                        let ph = wrap?.querySelector(".sc-card__image-placeholder");
+                        if (!ph && wrap) {
+                          ph = document.createElement("div");
+                          ph.className = "sc-card__image-placeholder";
+                          ph.textContent = "No photo";
+                          wrap.appendChild(ph);
+                        }
+                        if (ph) ph.style.display = "flex";
+                      }}
+                    />
+                  ) : null}
+                  <div className="sc-card__image-placeholder" style={{ display: firstImageUrl ? "none" : "flex" }}>
+                    No photo
+                  </div>
+                </div>
 
-              {renderReviews(service)}
+                <div className="sc-card__content">
+                  <div className="sc-card__tags-row">
+                    <div className="sc-card__tags">
+                      <span className="sc-card__tag sc-card__tag--category">
+                        {service?.category || "General"}
+                      </span>
+                      <span className={`sc-card__tag sc-card__tag--status ${isAvailable ? "sc-card__tag--available" : "sc-card__tag--unavailable"}`}>
+                        {service?.availabilityStatus || "—"}
+                      </span>
+                    </div>
+                    <span className="sc-card__provider-badge" title={providerName}>
+                      {providerPhoto ? (
+                        <img src={providerPhoto} alt={providerName} className="sc-card__provider-avatar" />
+                      ) : (
+                        getProviderInitials(providerName)
+                      )}
+                    </span>
+                  </div>
 
-              {(role === "user" || !role) && (
-                <button
-                  style={actionButtonStyle}
-                  onClick={() => handleBookingClick(service._id)}
-                >
-                  Book Now
-                </button>
-              )}
-            </div>
-          ))}
+                  <h3 className="sc-card__title">{service.serviceName}</h3>
+
+                  {truncatedDesc && (
+                    <p className="sc-card__desc">{truncatedDesc}</p>
+                  )}
+
+                  <div className="sc-card__provider">
+                    <span className="sc-card__provider-name">{providerName}</span>
+                    {locationDisplay && (
+                      <span className="sc-card__provider-location" title={locationDisplay}>
+                        {locationDisplay.length > 30 ? `${locationDisplay.slice(0, 30)}…` : locationDisplay}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="sc-card__bottom">
+                    <div className="sc-card__price-rating">
+                      <span className="sc-card__price">{formatLrdPrice(service?.price)}</span>
+                      <span className="sc-card__rating">
+                        {formatStars(displayRating)}
+                        {displayRating > 0 && (
+                          <em className="sc-card__rating-num">{Number(displayRating).toFixed(1)}</em>
+                        )}
+                        {reviewCount > 0 && (
+                          <span className="sc-card__rating-count">({reviewCount})</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="sc-card__actions">
+                      <button
+                        type="button"
+                        className="sc-card__btn sc-card__btn--secondary"
+                        onClick={() => handleReviewClick(service._id, service)}
+                      >
+                        View details
+                      </button>
+                      {(role === "user" || !role) && (
+                        <button
+                          type="button"
+                          className="sc-card__btn sc-card__btn--primary"
+                          onClick={() => handleBookingClick(service._id)}
+                          disabled={!isAvailable}
+                        >
+                          Book Now
+                        </button>
+                      )}
+                      {getWhatsAppUrl(providerPhone) && (
+                        <a
+                          href={getWhatsAppUrl(providerPhone)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="sc-card__whatsapp"
+                          title="Chat on WhatsApp"
+                          aria-label="Chat on WhatsApp"
+                        >
+                          <WhatsAppIcon size={20} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
 
       {!isLoading && !error && filteredServices.length === 0 && (
-        <p>No services match your search/filter criteria.</p>
+        <div className="services-empty">
+          <div className="services-empty__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" />
+            </svg>
+          </div>
+          <h3 className="services-empty__title">No services match your filters</h3>
+          <p className="services-empty__text">Try changing the category, location, or price range to see more results.</p>
+          <button
+            type="button"
+            className="services-empty__btn"
+            onClick={() => {
+              setSearchInputs({ selectedCategory: "All", location: "", minPrice: "", maxPrice: "" });
+              setAppliedFilters({ selectedCategory: "All", location: "", minPrice: "", maxPrice: "" });
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
       )}
-
-      <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "14px" }}>
-        <button
-          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-          disabled={currentPage === 1 || isLoading}
-        >
-          Previous Page
-        </button>
-
-        <span>
-          Page {currentPage} of {Math.max(totalPages, currentPage)}
-        </span>
-
-        <button
-          onClick={() => setCurrentPage((prev) => prev + 1)}
-          disabled={(!hasNextPage && currentPage >= totalPages) || isLoading}
-        >
-          Next Page
-        </button>
-      </div>
     </div>
   );
 };

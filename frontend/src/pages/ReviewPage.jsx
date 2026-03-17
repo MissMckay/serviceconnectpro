@@ -1,14 +1,25 @@
-import { useState } from "react";
+import { useState, useEffect, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import API from "../services/api";
+import { AuthContext } from "../context/AuthContext";
+import { getBookingById, createReview } from "../firebase/firestoreServices";
 
 const ReviewPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const [booking, setBooking] = useState(null);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    if (!id) return;
+    getBookingById(id)
+      .then(setBooking)
+      .catch(() => setLoadError("Booking not found."));
+  }, [id]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -21,23 +32,45 @@ const ReviewPage = () => {
       alert("Comment is required.");
       return;
     }
+    if (!booking || !user) {
+      alert("Booking not found or not signed in.");
+      return;
+    }
+    if (booking.status !== "Completed") {
+      alert("You can only review completed bookings.");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      await API.post("/reviews", {
+      await createReview({
         bookingId: id,
+        serviceId: booking.serviceId,
+        userId: user.uid,
         rating: safeRating,
         comment: comment.trim(),
-        anonymous: isAnonymous
       });
       alert("Review Submitted");
-      navigate("/user?view=bookings");
+      navigate("/my-bookings");
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to submit review");
+      alert(err?.message || "Failed to submit review");
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (loadError) {
+    return (
+      <div className="review-page">
+        <p>{loadError}</p>
+        <button type="button" onClick={() => navigate("/my-bookings")}>Back to bookings</button>
+      </div>
+    );
+  }
+
+  if (!booking) {
+    return <div className="review-page">Loading...</div>;
+  }
 
   return (
     <div className="review-page">
@@ -104,4 +137,3 @@ const ReviewPage = () => {
 };
 
 export default ReviewPage;
-

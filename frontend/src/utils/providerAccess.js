@@ -15,6 +15,7 @@ export const isProviderApproved = (user) => {
 
 export const canProviderCreateServices = (user) => {
   const role = normalizeText(user?.role);
+  // Providers must be active AND approved before they can add services.
   return role === "provider" && isProviderApproved(user) && getAccountStatus(user) === "active";
 };
 

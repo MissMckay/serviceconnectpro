@@ -7,12 +7,18 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:5000";
 
   return {
+    base: "/",
     plugins: [react()],
     server: {
       proxy: {
         "/api": {
           target: proxyTarget,
           changeOrigin: true,
+        },
+        "/socket.io": {
+          target: proxyTarget,
+          changeOrigin: true,
+          ws: true,
         },
       },
     },

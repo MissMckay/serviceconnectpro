@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import API from "../services/api";
-import { formatStars } from "../utils/rating";
+import { getServiceById, getReviewsByService } from "../firebase/firestoreServices";
+import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination } from "swiper/modules";
+import WhatsAppIcon from "../components/WhatsAppIcon";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
@@ -21,28 +22,9 @@ const ServiceDetails = () => {
   const [error, setError] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
-
-  const cardStyle = {
-    border: "1px solid #e3e7ee",
-    borderRadius: "14px",
-    padding: "16px",
-    marginBottom: "14px",
-    background: "var(--bg-white)",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
-  };
-
-  const actionButtonStyle = {
-    border: "none",
-    borderRadius: "12px",
-    padding: "8px 12px",
-    background: "var(--brand-red)",
-    color: "#fff",
-    cursor: "pointer"
-  };
-
   const backTarget = state?.from === "user-dashboard" ? "/user" : "/services";
   const backLabel =
-    state?.from === "user-dashboard" ? "Back to User Dashboard" : "Back to Services";
+    state?.from === "user-dashboard" ? "Back to Dashboard" : "Back to Services";
 
   const getReviewerName = (review) =>
     review?.userId?.name ||
@@ -51,12 +33,46 @@ const ServiceDetails = () => {
     review?.name ||
     "Anonymous";
 
-  // Provider profile (from populated providerId)
+  const getReviewerInitials = (review) => {
+    const name = getReviewerName(review);
+    const n = (name || "").trim();
+    if (!n || n === "Anonymous") return "?";
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
+    return n.slice(0, 2).toUpperCase();
+  };
+
   const getProviderName = (entry) =>
-    entry?.providerId?.name || "Not provided";
+    entry?.providerName || entry?.providerId?.name || "Not provided";
 
   const getProviderAddress = (entry) =>
-    entry?.providerId?.providerAddress || "Not provided";
+    entry?.providerAddress ||
+    entry?.providerId?.providerAddress ||
+    entry?.provider_address ||
+    "Not provided";
+
+  const getProviderPhone = (entry) =>
+    entry?.providerPhone || entry?.providerId?.phone || entry?.phone || "Not provided";
+
+  const getProviderInitials = (name) => {
+    const n = (name || "").trim();
+    if (!n || n === "Not provided") return "?";
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
+    return n.slice(0, 2).toUpperCase();
+  };
+
+  const getProviderPhoto = (service) =>
+    service?.providerProfilePhoto ||
+    service?.providerId?.profilePhoto ||
+    service?.provider?.profilePhoto ||
+    service?.createdBy?.profilePhoto ||
+    "";
+
+  const formatPhoneForWhatsApp = (phone) => {
+    const p = (phone || "").replace(/\D/g, "");
+    return p ? p : null;
+  };
 
   const getReviewTimestamp = (review) => {
     const rawDate = review?.createdAt || review?.updatedAt || review?.date;
@@ -76,25 +92,20 @@ const ServiceDetails = () => {
 
   useEffect(() => {
     const fetchServiceDetails = async () => {
+      if (!id) return;
       setIsLoading(true);
       setError("");
       try {
-        const [serviceRes, reviewsRes] = await Promise.all([
-          API.get(`/services/${id}`),
-          API.get(`/reviews/service/${id}`).catch(() => ({ data: { data: [] } }))
+        const [serviceData, serviceReviews] = await Promise.all([
+          getServiceById(id),
+          getReviewsByService(id)
         ]);
-
-        setService(serviceRes.data?.data || null);
-
-        const serviceReviews = Array.isArray(reviewsRes.data?.data)
-          ? reviewsRes.data.data
-          : [];
-
-        setReviews(serviceReviews);
+        setService(serviceData || null);
+        setReviews(Array.isArray(serviceReviews) ? serviceReviews : []);
       } catch (err) {
         setService(null);
         setReviews([]);
-        setError(err.response?.data?.message || "Failed to load service details.");
+        setError(err?.message || "Failed to load service details.");
       } finally {
         setIsLoading(false);
       }
@@ -109,146 +120,253 @@ const ServiceDetails = () => {
   );
 
   if (isLoading) {
-    return <div className="page-shell">Loading service details...</div>;
+    return (
+      <div className="service-details-page">
+        <div className="service-details-loading">Loading service details…</div>
+      </div>
+    );
   }
 
   if (error) {
     return (
-      <div className="page-shell">
-        <p style={{ color: "var(--brand-red)" }}>{error}</p>
-        <button style={actionButtonStyle} onClick={() => navigate(backTarget)}>
-          {backLabel}
-        </button>
+      <div className="service-details-page">
+        <div className="service-details-error-card">
+          <p className="service-details-error-text">{error}</p>
+          <button className="service-details-btn" onClick={() => navigate(backTarget)}>
+            {backLabel}
+          </button>
+        </div>
       </div>
     );
   }
 
   if (!service) {
     return (
-      <div className="page-shell">
-        <p>Service not found.</p>
-        <button style={actionButtonStyle} onClick={() => navigate(backTarget)}>
-          {backLabel}
-        </button>
+      <div className="service-details-page">
+        <div className="service-details-error-card">
+          <p>Service not found.</p>
+          <button className="service-details-btn" onClick={() => navigate(backTarget)}>
+            {backLabel}
+          </button>
+        </div>
       </div>
     );
   }
 
   const serviceMedia = getServiceMedia(service);
   const totalImages = serviceMedia.length;
+  const providerName = getProviderName(service);
+  const providerAddress = getProviderAddress(service);
+  const providerPhoto = getProviderPhoto(service);
+  const providerPhone = getProviderPhone(service);
+  const whatsappNumber = formatPhoneForWhatsApp(providerPhone);
+  const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
+  const serviceWithReviews = { ...service, reviews };
+  const { average: computedAvg, count: reviewCount } = getAverageRatingAndCount(serviceWithReviews);
+  const displayRating = Number.isFinite(Number(service?.averageRating))
+    ? Number(service.averageRating)
+    : computedAvg;
 
   return (
-    <div className="page-shell">
-      <div style={cardStyle}>
+    <div className="service-details-page">
+      <nav className="service-details-nav">
+        <button
+          type="button"
+          className="service-details-back"
+          onClick={() => navigate(backTarget)}
+        >
+          ← {backLabel}
+        </button>
+      </nav>
 
-        <h2 style={{ marginTop: 0 }}>Service Details</h2>
+      <div className="service-details-layout">
+        {/* Left: Gallery + Description + Reviews */}
+        <div className="service-details-main">
+          <section className="service-details-gallery-section">
+            {totalImages > 0 ? (
+              <>
+                <div className="service-details-slider-wrap">
+                  {totalImages > 1 && (
+                    <span className="service-details-image-badge">
+                      {totalImages} {totalImages === 1 ? "photo" : "photos"}
+                    </span>
+                  )}
+                  <Swiper
+                    modules={[Navigation, Pagination]}
+                    spaceBetween={12}
+                    slidesPerView={1}
+                    navigation
+                    pagination={{ clickable: true }}
+                    className="service-details-swiper"
+                  >
+                    {serviceMedia.map((item, index) => (
+                      <SwiperSlide key={index}>
+                        <button
+                          type="button"
+                          className="service-details-zoom-wrap"
+                          onClick={() => setLightboxIndex(index)}
+                        >
+                          <img
+                            src={item.url}
+                            alt={`${service.serviceName} — ${index + 1}`}
+                            loading="lazy"
+                          />
+                        </button>
+                        {item.description && (
+                          <p className="service-details-caption">{item.description}</p>
+                        )}
+                      </SwiperSlide>
+                    ))}
+                  </Swiper>
+                </div>
 
-        {/* ✅ ALL IMAGES FIRST */}
+                {lightboxIndex !== null && (
+                  <div
+                    className="lightbox-overlay"
+                    onClick={() => setLightboxIndex(null)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === "Escape" && setLightboxIndex(null)}
+                    aria-label="Close"
+                  >
+                    <img
+                      src={serviceMedia[lightboxIndex].url}
+                      alt="Full size"
+                      className="lightbox-image"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="service-details-no-image">No images</div>
+            )}
+          </section>
 
-{/* ===== IMAGE SECTION ===== */}
-{totalImages > 0 ? (
-  <>
-    <div className="service-slider-wrapper">
+          <section className="service-details-description-section">
+            <h2 className="service-details-section-title">About this service</h2>
+            <p className="service-details-description">
+              {service.description || "No description provided."}
+            </p>
+          </section>
 
-      {/* Image Counter Badge */}
-      {totalImages > 3 && (
-        <div className="image-count-badge">
-          +{totalImages - 3} more
+          <section className="service-details-reviews-section">
+            <h2 className="service-details-section-title">
+              Reviews {reviewCount > 0 && `(${reviewCount})`}
+            </h2>
+            {sortedReviews.length === 0 ? (
+              <p className="service-details-no-reviews">No reviews yet. Be the first to review!</p>
+            ) : (
+              <ul className="service-details-review-list">
+                {sortedReviews.map((review, index) => (
+                  <li key={review?._id || `review-${index}`} className="service-details-review-card">
+                    <div className="service-details-review-avatar">
+                      {getReviewerInitials(review)}
+                    </div>
+                    <div className="service-details-review-body">
+                      <div className="service-details-review-meta">
+                        <span className="service-details-review-name">
+                          {getReviewerName(review)}
+                        </span>
+                        <span className="service-details-review-date">
+                          {formatReviewDate(review)}
+                        </span>
+                      </div>
+                      <div className="service-details-review-stars">
+                        {formatStars(review?.rating)}
+                      </div>
+                      <p className="service-details-review-comment">
+                        {review?.comment || "No comment provided."}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
-      )}
 
-      <Swiper
-        modules={[Navigation, Pagination]}
-        spaceBetween={12}
-        slidesPerView={1}
-        navigation
-        pagination={{ clickable: true }}
-        className="service-swiper"
-      >
-        {serviceMedia.map((item, index) => (
-          <SwiperSlide key={index}>
-            <div>
-              <div
-                className="zoom-container"
-                onClick={() => setLightboxIndex(index)}
+        {/* Right: Sticky sidebar */}
+        <aside className="service-details-sidebar">
+          <div className="service-details-sidebar-card">
+            <h1 className="service-details-title">{service.serviceName}</h1>
+
+            <div className="service-details-badges">
+              <span className="service-details-badge service-details-badge-category">
+                {service.category || "General"}
+              </span>
+              <span
+                className={`service-details-badge service-details-badge-status ${isAvailable ? "available" : "unavailable"}`}
               >
-                <img
-                  src={item.url}
-                  alt={`Service ${index + 1}`}
-                  loading="lazy"
-                />
-              </div>
-              <p className="service-gallery-desc">
-                <strong>Image {index + 1}:</strong>{" "}
-                {item.description || "No description provided."}
-              </p>
+                {service.availabilityStatus || "—"}
+              </span>
             </div>
-          </SwiperSlide>
-        ))}
-      </Swiper>
-    </div>
 
-    {/* ===== LIGHTBOX MODAL ===== */}
-    {lightboxIndex !== null && (
-      <div
-        className="lightbox-overlay"
-        onClick={() => setLightboxIndex(null)}
-      >
-        <img
-          src={serviceMedia[lightboxIndex].url}
-          alt="Full view"
-          className="lightbox-image"
-        />
-      </div>
-    )}
-  </>
-) : (
-  <p>No image uploaded.</p>
-)}
-
-        {/* ✅ SERVICE NAME AFTER IMAGES */}
-        <h3>{service.serviceName}</h3>
-
-        <p><strong>Category:</strong> {service.category}</p>
-        <p><strong>Description:</strong> {service.description}</p>
-        <p><strong>Provider Name:</strong> {getProviderName(service)}</p>
-        <p><strong>Provider Address:</strong> {getProviderAddress(service)}</p>
-        <p><strong>Price:</strong> {formatLrdPrice(service?.price)}</p>
-        <p><strong>Status:</strong> {service.availabilityStatus}</p>
-        <p><strong>Average Rating:</strong> {formatStars(service.averageRating)}</p>
-      </div>
-
-      <h4 style={{ margin: "4px 0 12px" }}>Reviews</h4>
-
-      {sortedReviews.length === 0 ? (
-        <p>No reviews yet.</p>
-      ) : (
-        sortedReviews.map((review, index) => {
-          const reviewDate = formatReviewDate(review);
-          return (
-            <div key={review?._id || `review-${index}`} style={cardStyle}>
-              <p style={{ margin: "0 0 4px" }}>
-                <strong>{getReviewerName(review)}</strong>
-              </p>
-              <p style={{ margin: "0 0 4px" }}>
-                {formatStars(review?.rating)}
-              </p>
-              {reviewDate && (
-                <p style={{ margin: "0 0 6px", fontSize: "0.9em", color: "#666" }}>
-                  {reviewDate}
-                </p>
+            <div className="service-details-rating-block">
+              {formatStars(displayRating)}
+              {displayRating > 0 && (
+                <span className="service-details-rating-value">
+                  {Number(displayRating).toFixed(1)}
+                </span>
               )}
-              <p style={{ margin: 0 }}>
-                {review?.comment || "No comment provided."}
-              </p>
+              {reviewCount > 0 && (
+                <span className="service-details-rating-count">
+                  · {reviewCount} {reviewCount === 1 ? "review" : "reviews"}
+                </span>
+              )}
             </div>
-          );
-        })
-      )}
 
-      <button style={actionButtonStyle} onClick={() => navigate(backTarget)}>
-        {backLabel}
-      </button>
+            <div className="service-details-price-block">
+              <span className="service-details-price">{formatLrdPrice(service?.price)}</span>
+            </div>
+
+            <div className="service-details-provider-block">
+              <div className="service-details-provider-avatar">
+                {providerPhoto ? (
+                  <img src={providerPhoto} alt={providerName} />
+                ) : (
+                  getProviderInitials(providerName)
+                )}
+              </div>
+              <div className="service-details-provider-info">
+                <span className="service-details-provider-name">{providerName}</span>
+                {providerAddress && providerAddress !== "Not provided" && (
+                  <span className="service-details-provider-address">{providerAddress}</span>
+                )}
+              </div>
+              {whatsappNumber && (
+                <a
+                  href={`https://wa.me/${whatsappNumber}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="service-details-whatsapp"
+                  title="Chat on WhatsApp"
+                >
+                  <WhatsAppIcon size={22} />
+                </a>
+              )}
+            </div>
+
+            <div className="service-details-actions">
+              <button
+                type="button"
+                className="service-details-btn service-details-btn-primary"
+                onClick={() => navigate(`/book/${id}`)}
+                disabled={!isAvailable}
+              >
+                Book Now
+              </button>
+              <button
+                type="button"
+                className="service-details-btn service-details-btn-secondary"
+                onClick={() => navigate(backTarget)}
+              >
+                {backLabel}
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
     </div>
   );
 };
