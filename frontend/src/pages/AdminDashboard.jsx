@@ -850,23 +850,63 @@ const AdminDashboard = () => {
 
         {detailsModal.open && (
           <div className="admin-modal-backdrop" role="presentation" onClick={closeUserDetails}>
-            <div className="admin-modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal-card admin-modal-card-profile" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
               <div className="admin-modal-header">
-                <h3>User profile</h3>
-                <button type="button" className="admin-action-btn" onClick={closeUserDetails}>Close</button>
+                <h3 className="admin-modal-title">User profile</h3>
+                <button type="button" className="admin-modal-close" onClick={closeUserDetails} aria-label="Close">×</button>
               </div>
-              {detailsModal.loading ? <p>Loading profile...</p> : (
-                <div className="admin-modal-content">
-                  <p><strong>Name:</strong> {detailsModal.user?.name || "N/A"}</p>
-                  <p><strong>Email:</strong> {detailsModal.user?.email || "N/A"}</p>
-                  <p><strong>Phone:</strong> {detailsModal.user?.phone || "N/A"}</p>
-                  <p><strong>Role:</strong> {detailsModal.user?.role || "N/A"}</p>
-                  <p><strong>Account Status:</strong> {detailsModal.user?.accountStatus || "active"}</p>
-                  <p><strong>Approved:</strong> {getBooleanLabel(detailsModal.user?.isApproved)}</p>
-                  <p><strong>Created At:</strong> {formatDate(detailsModal.user?.createdAt)}</p>
-                  <p><strong>Address:</strong> {detailsModal.user?.providerAddress || detailsModal.user?.address || "N/A"}</p>
-                  <p><strong>Bookings Count:</strong> {detailsModal.details?.bookingsCount || 0}</p>
-                  <p><strong>Reviews Count:</strong> {detailsModal.details?.reviewsCount || 0}</p>
+              {detailsModal.loading ? (
+                <div className="admin-modal-skeleton">
+                  <div className="admin-modal-skeleton-avatar" />
+                  <div className="admin-modal-skeleton-line admin-modal-skeleton-line--wide" />
+                  <div className="admin-modal-skeleton-line" />
+                  <div className="admin-modal-skeleton-line" />
+                  <div className="admin-modal-skeleton-stats">
+                    <div className="admin-modal-skeleton-stat" />
+                    <div className="admin-modal-skeleton-stat" />
+                  </div>
+                </div>
+              ) : (
+                <div className="admin-modal-content admin-modal-content-profile">
+                  <div className="admin-modal-profile-hero">
+                    <div className="admin-modal-avatar">
+                      {(detailsModal.user?.name || "?").trim().split(/\s+/).length >= 2
+                        ? (detailsModal.user.name.trim().split(/\s+/)[0][0] + detailsModal.user.name.trim().split(/\s+/).pop()[0]).toUpperCase()
+                        : (detailsModal.user?.name || "?").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="admin-modal-profile-head">
+                      <h4 className="admin-modal-profile-name">{detailsModal.user?.name || "N/A"}</h4>
+                      <span className={`admin-modal-role-badge admin-modal-role-badge--${(detailsModal.user?.role || "user").toLowerCase()}`}>
+                        {detailsModal.user?.role || "user"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="admin-modal-section">
+                    <h5 className="admin-modal-section-title">Contact</h5>
+                    <dl className="admin-modal-dl">
+                      <div><dt>Email</dt><dd>{detailsModal.user?.email || "N/A"}</dd></div>
+                      <div><dt>Phone</dt><dd>{detailsModal.user?.phone || "N/A"}</dd></div>
+                      <div><dt>Address</dt><dd>{detailsModal.user?.providerAddress || detailsModal.user?.address || "N/A"}</dd></div>
+                    </dl>
+                  </div>
+                  <div className="admin-modal-section">
+                    <h5 className="admin-modal-section-title">Account</h5>
+                    <dl className="admin-modal-dl">
+                      <div><dt>Status</dt><dd><span className={`admin-modal-status admin-modal-status--${(detailsModal.user?.accountStatus || "active").toLowerCase()}`}>{detailsModal.user?.accountStatus || "active"}</span></dd></div>
+                      <div><dt>Approved</dt><dd>{getBooleanLabel(detailsModal.user?.isApproved)}</dd></div>
+                      <div><dt>Joined</dt><dd>{formatDate(detailsModal.user?.createdAt)}</dd></div>
+                    </dl>
+                  </div>
+                  <div className="admin-modal-stats">
+                    <div className="admin-modal-stat">
+                      <span className="admin-modal-stat-value">{detailsModal.details?.bookingsCount ?? 0}</span>
+                      <span className="admin-modal-stat-label">Bookings</span>
+                    </div>
+                    <div className="admin-modal-stat">
+                      <span className="admin-modal-stat-value">{detailsModal.details?.reviewsCount ?? 0}</span>
+                      <span className="admin-modal-stat-label">Reviews</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

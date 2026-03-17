@@ -19,6 +19,8 @@ const connectDB = async () => {
     const baseDelayMs = Number.parseInt(process.env.MONGO_CONNECT_BASE_DELAY_MS || "1000", 10);
     const serverSelectionTimeoutMS = Number.parseInt(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || "10000", 10);
     const connectTimeoutMS = Number.parseInt(process.env.MONGO_CONNECT_TIMEOUT_MS || "10000", 10);
+    const socketTimeoutMS = Number.parseInt(process.env.MONGO_SOCKET_TIMEOUT_MS || "10000", 10);
+    const maxPoolSize = Number.parseInt(process.env.MONGO_MAX_POOL_SIZE || "10", 10);
 
     // If using SRV URI, try Google DNS first (many networks block SRV on default DNS)
     const useSrv = mongoUri.startsWith("mongodb+srv://");
@@ -31,6 +33,8 @@ const connectDB = async () => {
             await mongoose.connect(mongoUri, {
                 serverSelectionTimeoutMS,
                 connectTimeoutMS,
+                socketTimeoutMS,
+                maxPoolSize,
             });
             const dbName = mongoose.connection.db?.databaseName || "unknown";
             console.log("MongoDB Connected to database:", dbName);

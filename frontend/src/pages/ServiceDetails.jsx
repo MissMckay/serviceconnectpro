@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { getServiceById, getReviewsByService } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
@@ -90,29 +90,38 @@ const ServiceDetails = () => {
     });
   };
 
-  useEffect(() => {
-    const fetchServiceDetails = async () => {
-      if (!id) return;
-      setIsLoading(true);
-      setError("");
-      try {
-        const [serviceData, serviceReviews] = await Promise.all([
-          getServiceById(id),
-          getReviewsByService(id)
-        ]);
-        setService(serviceData || null);
-        setReviews(Array.isArray(serviceReviews) ? serviceReviews : []);
-      } catch (err) {
+  const fetchServiceDetails = useCallback(async (showLoading = true) => {
+    if (!id) return;
+    if (showLoading) setIsLoading(true);
+    setError("");
+    try {
+      const [serviceData, serviceReviews] = await Promise.all([
+        getServiceById(id),
+        getReviewsByService(id)
+      ]);
+      setService(serviceData || null);
+      setReviews(Array.isArray(serviceReviews) ? serviceReviews : []);
+    } catch (err) {
+      if (showLoading) {
         setService(null);
         setReviews([]);
         setError(err?.message || "Failed to load service details.");
-      } finally {
-        setIsLoading(false);
       }
-    };
-
-    fetchServiceDetails();
+    } finally {
+      if (showLoading) setIsLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchServiceDetails(true);
+  }, [fetchServiceDetails]);
+
+  /* Real-time: refetch every 30s so details stay fresh */
+  useEffect(() => {
+    if (!id) return;
+    const interval = setInterval(() => fetchServiceDetails(false), 30000);
+    return () => clearInterval(interval);
+  }, [id, fetchServiceDetails]);
 
   const sortedReviews = useMemo(
     () => [...reviews].sort((a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)),
@@ -122,7 +131,25 @@ const ServiceDetails = () => {
   if (isLoading) {
     return (
       <div className="service-details-page">
-        <div className="service-details-loading">Loading service details…</div>
+        <nav className="service-details-nav">
+          <div className="service-details-skeleton service-details-skeleton-back" />
+        </nav>
+        <div className="service-details-layout service-details-skeleton-layout">
+          <div className="service-details-main">
+            <div className="service-details-skeleton service-details-skeleton-gallery" />
+            <div className="service-details-skeleton service-details-skeleton-block" />
+            <div className="service-details-skeleton service-details-skeleton-block service-details-skeleton-reviews" />
+          </div>
+          <aside className="service-details-sidebar">
+            <div className="service-details-sidebar-card service-details-skeleton-card">
+              <div className="service-details-skeleton service-details-skeleton-title" />
+              <div className="service-details-skeleton service-details-skeleton-badges" />
+              <div className="service-details-skeleton service-details-skeleton-price" />
+              <div className="service-details-skeleton service-details-skeleton-provider" />
+              <div className="service-details-skeleton service-details-skeleton-btn" />
+            </div>
+          </aside>
+        </div>
       </div>
     );
   }
@@ -168,7 +195,7 @@ const ServiceDetails = () => {
     : computedAvg;
 
   return (
-    <div className="service-details-page">
+    <div className="service-details-page service-details-page-enter">
       <nav className="service-details-nav">
         <button
           type="button"
@@ -193,11 +220,13 @@ const ServiceDetails = () => {
                   )}
                   <Swiper
                     modules={[Navigation, Pagination]}
-                    spaceBetween={12}
+                    spaceBetween={0}
                     slidesPerView={1}
+                    slidesPerGroup={1}
                     navigation
                     pagination={{ clickable: true }}
                     className="service-details-swiper"
+                    style={{ width: "100%" }}
                   >
                     {serviceMedia.map((item, index) => (
                       <SwiperSlide key={index}>
@@ -210,6 +239,7 @@ const ServiceDetails = () => {
                             src={item.url}
                             alt={`${service.serviceName} — ${index + 1}`}
                             loading="lazy"
+                            decoding="async"
                           />
                         </button>
                         {item.description && (

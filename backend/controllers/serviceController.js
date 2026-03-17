@@ -202,6 +202,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(fetchLimit)
+      .maxTimeMS(4000)
       .lean();
 
     const hasMore = rawServices.length > limit;
@@ -239,6 +240,11 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     res.json(payload);
   } catch (err) {
     console.error("getAllServices error:", err);
+    // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
+    const lastCached = listCache.get(cacheKey);
+    if (lastCached?.payload) {
+      return res.json(lastCached.payload);
+    }
     res.status(200).json({
       success: true,
       data: [],
@@ -260,7 +266,9 @@ exports.getServiceById = asyncHandler(async (req, res) => {
     error.statusCode = 400;
     throw error;
   }
-  const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } }).lean();
+  const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } })
+    .maxTimeMS(4000)
+    .lean();
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;

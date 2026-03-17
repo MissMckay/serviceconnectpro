@@ -26,3 +26,4 @@ dist-ssr
 .env.local
 backend/node_modules/
 .firebase/
+node_modules/
