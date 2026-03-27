@@ -1,18 +1,20 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { getServices, updateUserProfile } from "../firebase/firestoreServices";
+import { getServices, getUserProfile, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
+import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const UserDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [services, setServices] = useState([]);
+  const [providerProfiles, setProviderProfiles] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [categoryInput, setCategoryInput] = useState("All");
@@ -140,12 +142,7 @@ const UserDashboard = () => {
     return n.slice(0, 2).toUpperCase();
   };
 
-  const getProviderPhoto = (service) =>
-    service?.providerProfilePhoto ||
-    service?.providerId?.profilePhoto ||
-    service?.provider?.profilePhoto ||
-    service?.createdBy?.profilePhoto ||
-    "";
+  const getProviderPhoto = (service) => getLiveProviderPhoto(service, providerProfiles);
 
   const formatPhoneForWhatsApp = (phone) => {
     const p = (phone || "").replace(/\D/g, "");
@@ -189,6 +186,33 @@ const UserDashboard = () => {
   useEffect(() => {
     fetchServicesForDashboard();
   }, [filters.category, filters.location]);
+
+  useEffect(() => {
+    const providerIds = [...new Set(services.map(getServiceProviderId).filter(Boolean))];
+    if (!providerIds.length) {
+      setProviderProfiles({});
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadProfiles = async () => {
+      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      if (cancelled) return;
+      const nextProfiles = profiles.reduce((acc, profile) => {
+        const providerId = getEntityId(profile);
+        if (providerId) acc[providerId] = profile;
+        return acc;
+      }, {});
+      setProviderProfiles(nextProfiles);
+    };
+
+    loadProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [services]);
 
   useEffect(() => {
     const handleServiceUpdates = () => fetchServicesForDashboard();

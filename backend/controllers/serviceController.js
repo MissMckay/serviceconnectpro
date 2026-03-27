@@ -170,9 +170,25 @@ exports.createService = asyncHandler(async (req, res) => {
 // In-memory cache for services list to make repeat loads / retries instant (TTL 5s)
 const listCache = new Map();
 const LIST_CACHE_TTL_MS = 5000;
+const MONGO_CONNECTED_STATE = 1;
 
 const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "") =>
   `${page}|${limit}|${category}|${minPrice}|${maxPrice}|${location}`;
+
+const getFallbackServicesPayload = (page, limit, cachedPayload) => {
+  if (cachedPayload) return cachedPayload;
+  return {
+    success: true,
+    data: [],
+    pagination: {
+      page,
+      limit,
+      total: 0,
+      totalPages: 1,
+      hasNextPage: false
+    }
+  };
+};
 
 exports.getAllServices = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -187,6 +203,14 @@ exports.getAllServices = asyncHandler(async (req, res) => {
   const cached = listCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
     return res.json(cached.payload);
+  }
+
+  if (mongoose.connection.readyState !== MONGO_CONNECTED_STATE) {
+    console.error(
+      "getAllServices skipped: MongoDB is not connected.",
+      { readyState: mongoose.connection.readyState }
+    );
+    return res.json(getFallbackServicesPayload(page, limit, cached?.payload));
   }
 
   try {
@@ -242,20 +266,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     console.error("getAllServices error:", err);
     // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
     const lastCached = listCache.get(cacheKey);
-    if (lastCached?.payload) {
-      return res.json(lastCached.payload);
-    }
-    res.status(200).json({
-      success: true,
-      data: [],
-      pagination: {
-        page: 1,
-        limit,
-        total: 0,
-        totalPages: 1,
-        hasNextPage: false
-      }
-    });
+    res.status(200).json(getFallbackServicesPayload(page, limit, lastCached?.payload));
   }
 });
 

@@ -2,6 +2,30 @@ const mongoose = require('mongoose');
 const dns = require('dns');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let listenersAttached = false;
+
+const attachConnectionListeners = () => {
+    if (listenersAttached) return;
+    listenersAttached = true;
+
+    mongoose.connection.on("connected", () => {
+        const dbName = mongoose.connection.db?.databaseName || "unknown";
+        console.log("MongoDB connection event: connected to", dbName);
+    });
+
+    mongoose.connection.on("reconnected", () => {
+        console.log("MongoDB connection event: reconnected");
+    });
+
+    mongoose.connection.on("disconnected", () => {
+        console.error("MongoDB connection event: disconnected");
+    });
+
+    mongoose.connection.on("error", (error) => {
+        console.error("MongoDB connection event: error");
+        console.error(error);
+    });
+};
 
 const connectDB = async () => {
     // Prefer standard URI if set (avoids DNS SRV lookup, works when network blocks querySrv)
@@ -14,6 +38,7 @@ const connectDB = async () => {
     }
 
     mongoose.set('bufferCommands', false);
+    attachConnectionListeners();
 
     const maxRetries = Number.parseInt(process.env.MONGO_CONNECT_RETRIES || "5", 10);
     const baseDelayMs = Number.parseInt(process.env.MONGO_CONNECT_BASE_DELAY_MS || "1000", 10);

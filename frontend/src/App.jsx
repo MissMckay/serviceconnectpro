@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import "./design-system.css";
 import "./App.css";
@@ -5,19 +6,35 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
 
-import AuthPage from "./pages/AuthPage";
-import ForgotPassword from "./pages/ForgotPassword";
-import RegisterAdmin from "./pages/RegisterAdmin";
-import AdminLoginPage from "./pages/AdminLoginPage";
-import ServiceListing from "./pages/ServiceListing";
-import ServiceDetails from "./pages/ServiceDetails";
-import BookingPage from "./pages/BookingPage";
-import ReviewPage from "./pages/ReviewPage";
-import ProviderDashboard from "./pages/ProviderDashboard";
-import AdminDashboard from "./pages/AdminDashboard";
-import UserDashboard from "./pages/UserDashboard";
-import UserBookings from "./pages/UserBookings";
-import MessagesLayout from "./components/MessagesLayout";
+const AuthPage = lazy(() => import("./pages/AuthPage"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const RegisterAdmin = lazy(() => import("./pages/RegisterAdmin"));
+const AdminLoginPage = lazy(() => import("./pages/AdminLoginPage"));
+const ServiceListing = lazy(() => import("./pages/ServiceListing"));
+const ServiceDetails = lazy(() => import("./pages/ServiceDetails"));
+const BookingPage = lazy(() => import("./pages/BookingPage"));
+const ReviewPage = lazy(() => import("./pages/ReviewPage"));
+const ProviderDashboard = lazy(() => import("./pages/ProviderDashboard"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const UserDashboard = lazy(() => import("./pages/UserDashboard"));
+const UserBookings = lazy(() => import("./pages/UserBookings"));
+const MessagesLayout = lazy(() => import("./components/MessagesLayout"));
+
+const RouteFallback = () => (
+  <div className="route-loading-shell" role="status" aria-live="polite">
+    <div className="route-loading-card">
+      <div className="route-loading-spinner" />
+      <p>Loading content...</p>
+    </div>
+  </div>
+);
+
+const withSuspense = (element) => (
+  <Suspense fallback={<RouteFallback />}>
+    {element}
+  </Suspense>
+);
+
 const AppRoutes = () => {
   const location = useLocation();
   const hideNavbar =
@@ -38,15 +55,15 @@ const AppRoutes = () => {
       <Routes>
 
         {/* Public Routes */}
-        <Route path="/" element={<ServiceListing />} />
-        <Route path="/login" element={<AuthPage />} />
-        <Route path="/register" element={<AuthPage />} />
-        <Route path="/register-admin" element={<RegisterAdmin />} />
-        <Route path="/admin-login" element={<AdminLoginPage />} />
-        <Route path="/admin/login" element={<AdminLoginPage />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/services" element={<ServiceListing />} />
-        <Route path="/services/:id" element={<ServiceDetails />} />
+        <Route path="/" element={withSuspense(<ServiceListing />)} />
+        <Route path="/login" element={withSuspense(<AuthPage />)} />
+        <Route path="/register" element={withSuspense(<AuthPage />)} />
+        <Route path="/register-admin" element={withSuspense(<RegisterAdmin />)} />
+        <Route path="/admin-login" element={withSuspense(<AdminLoginPage />)} />
+        <Route path="/admin/login" element={withSuspense(<AdminLoginPage />)} />
+        <Route path="/forgot-password" element={withSuspense(<ForgotPassword />)} />
+        <Route path="/services" element={withSuspense(<ServiceListing />)} />
+        <Route path="/services/:id" element={withSuspense(<ServiceDetails />)} />
 
         {/* Protected Routes (Any Logged-in User) */}
         <Route
@@ -54,7 +71,9 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute allowedRole="user">
               <DashboardLayout role="user">
-                <BookingPage />
+                <Suspense fallback={<RouteFallback />}>
+                  <BookingPage />
+                </Suspense>
               </DashboardLayout>
             </ProtectedRoute>
           }
@@ -65,7 +84,9 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute allowedRole="user">
               <DashboardLayout role="user">
-                <ReviewPage />
+                <Suspense fallback={<RouteFallback />}>
+                  <ReviewPage />
+                </Suspense>
               </DashboardLayout>
             </ProtectedRoute>
           }
@@ -77,7 +98,9 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute allowedRole="provider">
               <DashboardLayout role="provider">
-                <ProviderDashboard />
+                <Suspense fallback={<RouteFallback />}>
+                  <ProviderDashboard />
+                </Suspense>
               </DashboardLayout>
             </ProtectedRoute>
           }
@@ -89,7 +112,9 @@ const AppRoutes = () => {
           element={
             <ProtectedRoute allowedRole="admin">
               <DashboardLayout role="admin">
-                <AdminDashboard />
+                <Suspense fallback={<RouteFallback />}>
+                  <AdminDashboard />
+                </Suspense>
               </DashboardLayout>
             </ProtectedRoute>
           }
@@ -100,7 +125,9 @@ const AppRoutes = () => {
               element={
                   <ProtectedRoute allowedRole="user">
                       <DashboardLayout role="user">
-                        <UserDashboard/>
+                        <Suspense fallback={<RouteFallback />}>
+                          <UserDashboard/>
+                        </Suspense>
                       </DashboardLayout>
                   </ProtectedRoute>
               }
@@ -111,7 +138,9 @@ const AppRoutes = () => {
               element={
                   <ProtectedRoute allowedRole="user">
                       <DashboardLayout role="user">
-                        <UserBookings />
+                        <Suspense fallback={<RouteFallback />}>
+                          <UserBookings />
+                        </Suspense>
                       </DashboardLayout>
                   </ProtectedRoute>
               }
@@ -120,11 +149,13 @@ const AppRoutes = () => {
             path="/messages"
             element={
               <ProtectedRoute allowedRole={["user", "provider"]}>
-                <MessagesLayout />
+                <Suspense fallback={<RouteFallback />}>
+                  <MessagesLayout />
+                </Suspense>
               </ProtectedRoute>
             }
           />
-          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/auth" element={withSuspense(<AuthPage />)} />
       </Routes>
     </>
   );

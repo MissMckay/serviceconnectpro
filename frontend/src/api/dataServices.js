@@ -1,16 +1,65 @@
 import api from "./client";
 
-const POLL_MS = 3000;
+const POLL_MS = 10000;
+const CACHE_TTL_MS = 15000;
+const responseCache = new Map();
+const inflightRequests = new Map();
 
 function noopUnsub() {}
 
+function getCacheKey(type, key = "") {
+  return `${type}:${key}`;
+}
+
+function clearCacheByPrefix(prefix) {
+  Array.from(responseCache.keys()).forEach((key) => {
+    if (key.startsWith(prefix)) responseCache.delete(key);
+  });
+  Array.from(inflightRequests.keys()).forEach((key) => {
+    if (key.startsWith(prefix)) inflightRequests.delete(key);
+  });
+}
+
+async function getCachedOrFetch(cacheKey, fetcher, { forceFresh = false, ttlMs = CACHE_TTL_MS } = {}) {
+  const now = Date.now();
+  const cached = responseCache.get(cacheKey);
+
+  if (!forceFresh && cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  if (inflightRequests.has(cacheKey)) {
+    return inflightRequests.get(cacheKey);
+  }
+
+  const request = (async () => {
+    const value = await fetcher();
+    responseCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + ttlMs
+    });
+    return value;
+  })().finally(() => {
+    inflightRequests.delete(cacheKey);
+  });
+
+  inflightRequests.set(cacheKey, request);
+  return request;
+}
+
 // ---------- Users ----------
-export async function getUserProfile(uid) {
+export async function getUserProfile(uid, options = {}) {
   if (!uid) return null;
   try {
-    const res = await api.get(`users/${uid}`);
-    const d = res?.data ?? res;
-    return d ? { id: d._id || d.id, _id: d._id || d.id, ...d } : null;
+    return await getCachedOrFetch(
+      getCacheKey("user", uid),
+      async () => {
+        const res = await api.get(`users/${uid}`);
+        const d = res?.data ?? res;
+        return d ? { id: d._id || d.id, _id: d._id || d.id, ...d } : null;
+      },
+      options
+    );
   } catch {
     return null;
   }
@@ -27,7 +76,10 @@ export async function setUserProfile(uid, data) {
 }
 
 export async function updateUserProfile(uid, data) {
-  return setUserProfile(uid, data);
+  const result = await setUserProfile(uid, data);
+  clearCacheByPrefix(getCacheKey("user", uid || ""));
+  clearCacheByPrefix("services:");
+  return result;
 }
 
 export async function deleteUserProfile(uid) {
@@ -45,7 +97,7 @@ export function subscribeUserProfile(uid, setProfile) {
   }
   const fetchProfile = async () => {
     try {
-      const p = await getUserProfile(uid);
+      const p = await getUserProfile(uid, { forceFresh: true });
       if (setProfile) setProfile(p);
     } catch {
       if (setProfile) setProfile(null);
@@ -56,8 +108,8 @@ export function subscribeUserProfile(uid, setProfile) {
   return () => clearInterval(id);
 }
 
-/** Subscribe to users list with optional poll interval (default 2s for real-time updates). */
-export function subscribeUsers(setData, pollMs = 2000) {
+/** Subscribe to users list with optional poll interval. */
+export function subscribeUsers(setData, pollMs = 5000) {
   const fetchUsers = async () => {
     try {
       const res = await api.get("admin/users");
@@ -85,6 +137,7 @@ export function servicesRef() {
 }
 
 export async function getServices(filters = {}) {
+  const options = filters?.__options || {};
   const params = new URLSearchParams();
   if (filters.category && filters.category !== "All") params.set("category", filters.category);
   if (filters.minPrice != null && filters.minPrice !== "") params.set("minPrice", filters.minPrice);
@@ -92,40 +145,51 @@ export async function getServices(filters = {}) {
   if (filters.location && String(filters.location).trim()) params.set("location", filters.location);
   const q = params.toString();
   const path = `services${q ? `?${q}` : ""}`;
-  const res = await api.get(path);
-  // Backend returns { success: true, data: [...] }
-  const payload = res?.data ?? res;
-  const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-  return list.map((s) => ({
-    _id: s._id,
-    id: s._id,
-    ...s,
-    createdAt: s.createdAt ? new Date(s.createdAt) : null,
-    thumbnailUrl: s.thumbnailUrl || (Array.isArray(s.images) && s.images[0]?.imageUrl) || null,
-  }));
+  return getCachedOrFetch(
+    getCacheKey("services", q),
+    async () => {
+      const res = await api.get(path);
+      const payload = res?.data ?? res;
+      const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      return list.map((s) => ({
+        _id: s._id,
+        id: s._id,
+        ...s,
+        createdAt: s.createdAt ? new Date(s.createdAt) : null,
+        thumbnailUrl: s.thumbnailUrl || (Array.isArray(s.images) && s.images[0]?.imageUrl) || null,
+      }));
+    },
+    options
+  );
 }
 
 export function subscribeServices(filters, setData) {
-  const fetchList = async () => {
+  const fetchList = async (forceFresh = false) => {
     try {
-      const list = await getServices(filters || {});
+      const list = await getServices({ ...(filters || {}), __options: { forceFresh } });
       if (setData) setData(list);
     } catch {
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, POLL_MS);
+  fetchList(false);
+  const id = setInterval(() => fetchList(true), POLL_MS);
   return () => clearInterval(id);
 }
 
-export async function getServiceById(id) {
+export async function getServiceById(id, options = {}) {
   if (!id) return null;
   try {
-    const res = await api.get(`services/${id}`);
-    const payload = res?.data ?? res;
-    const s = payload?.data ?? payload;
-    return s ? { _id: s._id, id: s._id, ...s, createdAt: s.createdAt ? new Date(s.createdAt) : null } : null;
+    return await getCachedOrFetch(
+      getCacheKey("service", id),
+      async () => {
+        const res = await api.get(`services/${id}`);
+        const payload = res?.data ?? res;
+        const s = payload?.data ?? payload;
+        return s ? { _id: s._id, id: s._id, ...s, createdAt: s.createdAt ? new Date(s.createdAt) : null } : null;
+      },
+      options
+    );
   } catch {
     return null;
   }
@@ -146,6 +210,7 @@ export async function createService(providerId, data) {
     providerProfilePhoto: data.providerProfilePhoto ?? "",
   };
   const res = await api.post("services", body);
+  clearCacheByPrefix("services:");
   const payload = res?.data ?? res;
   const service = payload?.data ?? payload;
   return { serviceId: service?._id || service?.id, imagesSkipped: false };
@@ -161,10 +226,14 @@ export async function updateService(serviceId, data) {
   if (data.images != null) body.images = Array.isArray(data.images) ? data.images.slice(0, 10) : [];
   if (data.providerProfilePhoto != null) body.providerProfilePhoto = data.providerProfilePhoto;
   await api.put(`services/${serviceId}`, body);
+  clearCacheByPrefix("services:");
+  clearCacheByPrefix(getCacheKey("service", serviceId));
 }
 
 export async function deleteService(serviceId) {
   await api.delete(`services/${serviceId}`);
+  clearCacheByPrefix("services:");
+  clearCacheByPrefix(getCacheKey("service", serviceId));
 }
 
 // ---------- Bookings ----------

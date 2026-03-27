@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, useContext } from "react";
+import { useEffect, useMemo, useState, useContext, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import API from "../services/api";
 import { AuthContext } from "../context/AuthContext";
-import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeUsers } from "../firebase/firestoreServices";
+import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeUsers, subscribeServices } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
+import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 
 const allowedSections = new Set(["overview", "users", "services", "reports", "create-admin"]);
 
@@ -13,6 +14,8 @@ const getSectionFromSearch = (search) => {
 };
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
+const getUserId = (user) => user?._id || user?.id || user?.uid || "";
+const getSelectedUserIdFromSearch = (search) => new URLSearchParams(search).get("userId") || "";
 
 const formatDate = (value) => {
   if (!value) return "N/A";
@@ -95,6 +98,7 @@ const AdminDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+  const lastOpenedUserIdRef = useRef("");
 
   const [activeSection, setActiveSection] = useState(() => getSectionFromSearch(location.search));
   const [adminInviteCodes, setAdminInviteCodes] = useState([]);
@@ -102,11 +106,14 @@ const AdminDashboard = () => {
   const [adminInviteError, setAdminInviteError] = useState("");
   const [users, setUsers] = useState([]);
   const [services, setServices] = useState([]);
+  const [overviewServices, setOverviewServices] = useState([]);
+  const [serviceProviderProfiles, setServiceProviderProfiles] = useState({});
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [isServicesLoading, setIsServicesLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState({ type: "", message: "" });
   const [removedServicesCount, setRemovedServicesCount] = useState(0);
+  const [removedServices, setRemovedServices] = useState([]);
   const [busyActionId, setBusyActionId] = useState("");
   const [usersFilters, setUsersFilters] = useState({
     search: "",
@@ -133,10 +140,34 @@ const AdminDashboard = () => {
     user: null,
     details: null
   });
+  const [removedServiceModal, setRemovedServiceModal] = useState({
+    open: false,
+    service: null
+  });
 
   useEffect(() => {
     setActiveSection(getSectionFromSearch(location.search));
   }, [location.search]);
+
+  useEffect(() => {
+    const selectedUserId = getSelectedUserIdFromSearch(location.search);
+
+    if (!selectedUserId) {
+      if (detailsModal.open) {
+        closeUserDetails();
+      }
+      lastOpenedUserIdRef.current = "";
+      return;
+    }
+
+    if (activeSection !== "users" || users.length === 0 || lastOpenedUserIdRef.current === selectedUserId) return;
+
+    const selectedUser = users.find((entry) => String(getUserId(entry)) === String(selectedUserId));
+    if (!selectedUser) return;
+
+    lastOpenedUserIdRef.current = selectedUserId;
+    openUserDetails(selectedUser);
+  }, [activeSection, detailsModal.open, location.search, users]);
 
   useEffect(() => {
     if (!toast.message) return undefined;
@@ -164,6 +195,44 @@ const AdminDashboard = () => {
     }, 2000);
     return () => { if (typeof unsub === "function") unsub(); };
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = subscribeServices({}, (list) => {
+      setOverviewServices(Array.isArray(list) ? list : []);
+    });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const providerIds = [
+      ...new Set([...overviewServices, ...services].map(getServiceProviderId).filter(Boolean))
+    ];
+
+    if (!providerIds.length) {
+      setServiceProviderProfiles({});
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadProfiles = async () => {
+      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      if (cancelled) return;
+      const nextProfiles = profiles.reduce((acc, profile) => {
+        const providerId = getEntityId(profile);
+        if (providerId) acc[providerId] = profile;
+        return acc;
+      }, {});
+      setServiceProviderProfiles(nextProfiles);
+    };
+
+    loadProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [overviewServices, services]);
 
   const showSuccess = (message) => setToast({ type: "success", message });
   const showError = (message) => setToast({ type: "error", message });
@@ -329,6 +398,45 @@ const AdminDashboard = () => {
     };
   }, [users]);
 
+  const overviewUserMenus = useMemo(() => {
+    const providerUsers = users.filter((entry) => normalizeText(entry?.role) === "provider");
+    const pendingProviderUsers = providerUsers.filter(
+      (entry) => entry?.isApproved !== true && normalizeText(entry?.approvalStatus) !== "approved"
+    );
+    const suspendedAccountUsers = users.filter((entry) => normalizeText(entry?.accountStatus) === "suspended");
+
+    return [
+      {
+        key: "total-users",
+        label: "Total Users",
+        value: usersSummary.totalUsers,
+        users: users,
+        emptyLabel: "No users found."
+      },
+      {
+        key: "total-providers",
+        label: "Total Providers",
+        value: usersSummary.totalProviders,
+        users: providerUsers,
+        emptyLabel: "No providers found."
+      },
+      {
+        key: "pending-providers",
+        label: "Pending Providers",
+        value: usersSummary.pendingProviders,
+        users: pendingProviderUsers,
+        emptyLabel: "No pending providers."
+      },
+      {
+        key: "suspended-users",
+        label: "Suspended Users",
+        value: usersSummary.suspendedUsers,
+        users: suspendedAccountUsers,
+        emptyLabel: "No suspended users."
+      }
+    ];
+  }, [users, usersSummary.pendingProviders, usersSummary.suspendedUsers, usersSummary.totalProviders, usersSummary.totalUsers]);
+
   const reportsSummary = useMemo(
     () => ({
       ...usersSummary,
@@ -336,6 +444,26 @@ const AdminDashboard = () => {
       removedServices: removedServicesCount
     }),
     [usersSummary, servicePagination.total, services.length, removedServicesCount]
+  );
+
+  const overviewServiceMenus = useMemo(
+    () => [
+      {
+        key: "total-services",
+        label: "Total Services",
+        value: reportsSummary.totalServices,
+        services: overviewServices,
+        emptyLabel: "No services found."
+      },
+      {
+        key: "removed-services",
+        label: "Removed Services",
+        value: reportsSummary.removedServices,
+        services: removedServices,
+        emptyLabel: "No services removed in this session."
+      }
+    ],
+    [overviewServices, removedServices, reportsSummary.removedServices, reportsSummary.totalServices]
   );
 
   const reportMetrics = useMemo(() => {
@@ -475,7 +603,7 @@ const AdminDashboard = () => {
   };
 
   const openUserDetails = async (user) => {
-    const userId = user?._id || user?.id;
+    const userId = getUserId(user);
     if (!userId) return;
 
     setDetailsModal({
@@ -539,6 +667,49 @@ const AdminDashboard = () => {
       details: null
     });
 
+  const navigateToUserDetails = (user) => {
+    const userId = getUserId(user);
+    if (!userId) return;
+
+    const params = new URLSearchParams(location.search);
+    params.set("view", "users");
+    params.set("userId", userId);
+    const queryString = params.toString();
+    navigate(queryString ? `/admin?${queryString}` : "/admin");
+  };
+
+  const handleCloseUserDetails = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete("userId");
+    if (!params.get("view")) {
+      params.set("view", "users");
+    }
+    const queryString = params.toString();
+    navigate(queryString ? `/admin?${queryString}` : "/admin");
+    closeUserDetails();
+  };
+
+  const openRemovedServiceDetails = (service) => {
+    if (!service) return;
+    setRemovedServiceModal({
+      open: true,
+      service
+    });
+  };
+
+  const closeRemovedServiceDetails = () => {
+    setRemovedServiceModal({
+      open: false,
+      service: null
+    });
+  };
+
+  const navigateToServiceDetails = (service) => {
+    const serviceId = service?._id || service?.id;
+    if (!serviceId) return;
+    navigate(`/services/${serviceId}`, { state: { service } });
+  };
+
   const removeService = async (service) => {
     const serviceId = service?._id || service?.id;
     if (!serviceId) return;
@@ -561,6 +732,13 @@ const AdminDashboard = () => {
         }
       }
       if (!success) throw new Error("service-delete-failed");
+      setRemovedServices((prev) => [
+        {
+          ...service,
+          removedAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
       setRemovedServicesCount((prev) => prev + 1);
       await refreshServices();
       showSuccess("Service removed.");
@@ -582,6 +760,7 @@ const AdminDashboard = () => {
   };
 
   const getUserBusy = (userId, suffix) => busyActionId === `${userId}-${suffix}`;
+  const getServiceProviderPhoto = (service) => getLiveProviderPhoto(service, serviceProviderProfiles);
 
   return (
     <div className="admin-dashboard-page">
@@ -604,12 +783,85 @@ const AdminDashboard = () => {
               <h2 className="admin-card-title">Admin Dashboard</h2>
               <p className="admin-subtitle">Overview is a live operations snapshot for day-to-day moderation.</p>
               <div className="admin-report-strip">
-                <div className="admin-metric"><p>Total Users</p><strong>{reportsSummary.totalUsers}</strong></div>
-                <div className="admin-metric"><p>Total Providers</p><strong>{reportsSummary.totalProviders}</strong></div>
-                <div className="admin-metric"><p>Pending Providers</p><strong>{reportsSummary.pendingProviders}</strong></div>
-                <div className="admin-metric"><p>Suspended Users</p><strong>{reportsSummary.suspendedUsers}</strong></div>
-                <div className="admin-metric"><p>Total Services</p><strong>{reportsSummary.totalServices}</strong></div>
-                <div className="admin-metric"><p>Removed Services</p><strong>{reportsSummary.removedServices}</strong></div>
+                {overviewUserMenus.map((metric) => (
+                  <div
+                    key={metric.key}
+                    className="admin-metric admin-metric-dropdown"
+                    tabIndex={0}
+                    aria-label={`${metric.label}. Hover to view users.`}
+                  >
+                    <p>{metric.label}</p>
+                    <strong>{metric.value}</strong>
+                    <div className="admin-metric-menu" role="menu" aria-label={`${metric.label} users`}>
+                      <div className="admin-metric-menu-title">{metric.label}</div>
+                      <div className="admin-metric-menu-list">
+                        {metric.users.length === 0 ? (
+                          <div className="admin-metric-menu-empty">{metric.emptyLabel}</div>
+                        ) : metric.users.map((entry) => (
+                          <button
+                            key={`${metric.key}-${getUserId(entry)}`}
+                            type="button"
+                            className="admin-metric-menu-item"
+                            onClick={() => navigateToUserDetails(entry)}
+                            role="menuitem"
+                          >
+                            <span>{entry?.name || entry?.email || "Unnamed user"}</span>
+                            <small>{entry?.email || entry?.phone || entry?.role || "Open profile"}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {overviewServiceMenus.map((metric) => (
+                  <div
+                    key={metric.key}
+                    className="admin-metric admin-metric-dropdown"
+                    tabIndex={0}
+                    aria-label={`${metric.label}. Hover to view services.`}
+                  >
+                    <p>{metric.label}</p>
+                    <strong>{metric.value}</strong>
+                    <div className="admin-metric-menu" role="menu" aria-label={`${metric.label} services`}>
+                      <div className="admin-metric-menu-title">{metric.label}</div>
+                      <div className="admin-metric-menu-list">
+                        {metric.services.length === 0 ? (
+                          <div className="admin-metric-menu-empty">{metric.emptyLabel}</div>
+                        ) : metric.services.map((entry) => (
+                          <button
+                            key={`${metric.key}-${entry?._id || entry?.id}`}
+                            type="button"
+                            className="admin-metric-menu-item"
+                            onClick={() => (
+                              metric.key === "removed-services"
+                                ? openRemovedServiceDetails(entry)
+                                : navigateToServiceDetails(entry)
+                            )}
+                            role="menuitem"
+                          >
+                            <span className="admin-metric-menu-service">
+                              <span className="admin-metric-menu-service-avatar">
+                                {getServiceProviderPhoto(entry) ? (
+                                  <img src={getServiceProviderPhoto(entry)} alt={getProviderFromService(entry).name} />
+                                ) : (
+                                  String(getProviderFromService(entry).name || "?").trim().slice(0, 2).toUpperCase()
+                                )}
+                              </span>
+                              <span className="admin-metric-menu-service-copy">
+                                <span>{entry?.serviceName || "Untitled service"}</span>
+                                <small>
+                                  {metric.key === "removed-services"
+                                    ? `Removed ${formatDate(entry?.removedAt)}`
+                                    : `${getProviderFromService(entry).name} | ${entry?.category || "No category"}`}
+                                </small>
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </article>
           </section>
@@ -654,7 +906,7 @@ const AdminDashboard = () => {
                             <td>{user?.name || "N/A"}</td><td>{user?.email || "N/A"}</td><td>{user?.phone || "N/A"}</td><td>{user?.role || "N/A"}</td><td>{status}</td><td>{getBooleanLabel(user?.isApproved)}</td><td>{formatDate(user?.createdAt)}</td>
                             <td>
                               <div className="admin-inline-actions">
-                                <button type="button" className="admin-action-btn view-profile-btn" onClick={() => openUserDetails(user)}>View profile</button>
+                                <button type="button" className="admin-action-btn view-profile-btn" onClick={() => navigateToUserDetails(user)}>View profile</button>
                                 {isPendingProvider && (
                                   <>
                                     <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Accept</button>
@@ -711,7 +963,7 @@ const AdminDashboard = () => {
                           const imageCount = getServiceMedia(service).length;
                           return (
                             <tr key={serviceId}>
-                              <td>{service?.serviceName || "N/A"}</td><td>{provider.name}</td><td>{provider.phone}</td><td>{provider.address}</td><td>{service?.category || "N/A"}</td><td>{Number.isFinite(Number(service?.price)) ? `$${Number(service.price).toLocaleString("en-US")}` : "N/A"}</td><td>{formatDate(service?.createdAt)}</td><td>{service?.availabilityStatus || "N/A"}</td><td>{imageCount}</td>
+                              <td>{service?.serviceName || "N/A"}</td><td><span className="admin-provider-chip">{getServiceProviderPhoto(service) ? <img src={getServiceProviderPhoto(service)} alt={provider.name} className="admin-provider-chip-avatar" /> : <span className="admin-provider-chip-fallback">{String(provider.name || "?").trim().slice(0, 2).toUpperCase()}</span>}<span>{provider.name}</span></span></td><td>{provider.phone}</td><td>{provider.address}</td><td>{service?.category || "N/A"}</td><td>{Number.isFinite(Number(service?.price)) ? `$${Number(service.price).toLocaleString("en-US")}` : "N/A"}</td><td>{formatDate(service?.createdAt)}</td><td>{service?.availabilityStatus || "N/A"}</td><td>{imageCount}</td>
                               <td>
                                 <div className="admin-inline-actions">
                                   <button type="button" className="admin-action-btn" onClick={() => navigate(`/services/${serviceId}`)}>View</button>
@@ -849,11 +1101,11 @@ const AdminDashboard = () => {
         )}
 
         {detailsModal.open && (
-          <div className="admin-modal-backdrop" role="presentation" onClick={closeUserDetails}>
+          <div className="admin-modal-backdrop" role="presentation" onClick={handleCloseUserDetails}>
             <div className="admin-modal-card admin-modal-card-profile" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
               <div className="admin-modal-header">
                 <h3 className="admin-modal-title">User profile</h3>
-                <button type="button" className="admin-modal-close" onClick={closeUserDetails} aria-label="Close">×</button>
+                <button type="button" className="admin-modal-close" onClick={handleCloseUserDetails} aria-label="Close">×</button>
               </div>
               {detailsModal.loading ? (
                 <div className="admin-modal-skeleton">
@@ -909,6 +1161,36 @@ const AdminDashboard = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {removedServiceModal.open && (
+          <div className="admin-modal-backdrop" role="presentation" onClick={closeRemovedServiceDetails}>
+            <div className="admin-modal-card admin-modal-card-profile" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+              <div className="admin-modal-header">
+                <h3 className="admin-modal-title">Removed service</h3>
+                <button type="button" className="admin-modal-close" onClick={closeRemovedServiceDetails} aria-label="Close">×</button>
+              </div>
+              <div className="admin-modal-content admin-modal-content-profile">
+                <div className="admin-modal-section">
+                  <h5 className="admin-modal-section-title">Service</h5>
+                  <dl className="admin-modal-dl">
+                    <div><dt>Name</dt><dd>{removedServiceModal.service?.serviceName || "N/A"}</dd></div>
+                    <div><dt>Category</dt><dd>{removedServiceModal.service?.category || "N/A"}</dd></div>
+                    <div><dt>Price</dt><dd>{Number.isFinite(Number(removedServiceModal.service?.price)) ? `$${Number(removedServiceModal.service.price).toLocaleString("en-US")}` : "N/A"}</dd></div>
+                    <div><dt>Removed</dt><dd>{formatDate(removedServiceModal.service?.removedAt)}</dd></div>
+                  </dl>
+                </div>
+                <div className="admin-modal-section">
+                  <h5 className="admin-modal-section-title">Provider</h5>
+                  <dl className="admin-modal-dl">
+                    <div><dt>Name</dt><dd>{getProviderFromService(removedServiceModal.service).name}</dd></div>
+                    <div><dt>Phone</dt><dd>{getProviderFromService(removedServiceModal.service).phone}</dd></div>
+                    <div><dt>Address</dt><dd>{getProviderFromService(removedServiceModal.service).address}</dd></div>
+                  </dl>
+                </div>
+              </div>
             </div>
           </div>
         )}

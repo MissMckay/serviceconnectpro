@@ -2356,6 +2356,35 @@
   width: 10%;
 }
 
+.admin-provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-provider-chip-avatar,
+.admin-provider-chip-fallback {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.admin-provider-chip-avatar {
+  object-fit: cover;
+  border: 1px solid #d8e2f0;
+}
+
+.admin-provider-chip-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8eef9;
+  color: #1e3a6d;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .admin-status-pill {
   display: inline-flex;
   align-items: center;
@@ -2791,10 +2820,176 @@
 }
 
 .admin-metric {
+  position: relative;
   border: 1px solid #e5e9f2;
   border-radius: 12px;
   padding: 12px;
   background: #f9fbff;
+}
+
+.admin-metric-dropdown {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.admin-metric-dropdown:hover,
+.admin-metric-dropdown:focus-within {
+  border-color: rgba(0, 40, 104, 0.22);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+  background: #ffffff;
+}
+
+.admin-metric-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: min(360px, 92vw);
+  background: #ffffff;
+  border: 1px solid #d8e2f0;
+  border-radius: 14px;
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.16);
+  padding: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+  z-index: 15;
+}
+
+.admin-metric-dropdown:hover .admin-metric-menu,
+.admin-metric-dropdown:focus-within .admin-metric-menu {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.admin-metric-menu-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+
+.admin-metric-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.admin-metric-menu-item {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.admin-metric-menu-item:hover,
+.admin-metric-menu-item:focus-visible {
+  background: #eef5ff;
+  border-color: rgba(0, 40, 104, 0.25);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.admin-metric-menu-item span {
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.admin-metric-menu-item small {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.admin-metric-menu-empty {
+  color: #64748b;
+  font-size: 0.88rem;
+  padding: 6px 2px;
+}
+
+.admin-metric-menu-service {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-metric-menu-service-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #e8eef9;
+  color: #1e3a6d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.admin-metric-menu-service-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.admin-metric-menu-service-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.route-loading-shell {
+  min-height: min(60vh, 420px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+.route-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #d8e2f0;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.route-loading-card p {
+  margin: 0;
+}
+
+.route-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid #c7d2fe;
+  border-top-color: var(--brand-blue);
+  animation: route-loading-spin 0.7s linear infinite;
+}
+
+@keyframes route-loading-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .admin-metric p {
@@ -3765,7 +3960,7 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: #fff;
-  background: var(--brand-blue);
+  background: var(--brand-red);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -3775,7 +3970,7 @@
 }
 
 .services-search__btn:hover {
-  background: var(--brand-blue-hover);
+  background: var(--brand-red-hover);
   box-shadow: none;
   transform: none;
 }

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { getServiceById, getReviewsByService } from "../firebase/firestoreServices";
+import { getServiceById, getReviewsByService, subscribeUserProfile } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
+import { getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination } from "swiper/modules";
 import WhatsAppIcon from "../components/WhatsAppIcon";
@@ -18,6 +19,7 @@ const ServiceDetails = () => {
 
   const [service, setService] = useState(state?.service || null);
   const [reviews, setReviews] = useState([]);
+  const [providerProfile, setProviderProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -61,13 +63,6 @@ const ServiceDetails = () => {
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
     return n.slice(0, 2).toUpperCase();
   };
-
-  const getProviderPhoto = (service) =>
-    service?.providerProfilePhoto ||
-    service?.providerId?.profilePhoto ||
-    service?.provider?.profilePhoto ||
-    service?.createdBy?.profilePhoto ||
-    "";
 
   const formatPhoneForWhatsApp = (phone) => {
     const p = (phone || "").replace(/\D/g, "");
@@ -115,6 +110,19 @@ const ServiceDetails = () => {
   useEffect(() => {
     fetchServiceDetails(true);
   }, [fetchServiceDetails]);
+
+  useEffect(() => {
+    const providerId = getServiceProviderId(service);
+    if (!providerId) {
+      setProviderProfile(null);
+      return undefined;
+    }
+
+    const unsub = subscribeUserProfile(providerId, setProviderProfile);
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
+  }, [service]);
 
   /* Real-time: refetch every 30s so details stay fresh */
   useEffect(() => {
@@ -184,7 +192,9 @@ const ServiceDetails = () => {
   const totalImages = serviceMedia.length;
   const providerName = getProviderName(service);
   const providerAddress = getProviderAddress(service);
-  const providerPhoto = getProviderPhoto(service);
+  const providerPhoto = getLiveProviderPhoto(service, {
+    [getServiceProviderId(service)]: providerProfile,
+  });
   const providerPhone = getProviderPhone(service);
   const whatsappNumber = formatPhoneForWhatsApp(providerPhone);
   const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";

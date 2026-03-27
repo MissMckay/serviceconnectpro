@@ -9,6 +9,17 @@ export default defineConfig(({ mode }) => {
   return {
     base: "/",
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
+            if (id.includes("swiper")) return "swiper";
+            return undefined;
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         "/api": {

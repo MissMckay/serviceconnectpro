@@ -137,6 +137,22 @@ const ProviderDashboard = () => {
     return String(serviceProviderId) === String(providerId);
   };
 
+  const syncProviderPhotoAcrossServices = async (profilePhoto) => {
+    const role = String(providerProfile?.role || user?.role || "").toLowerCase();
+    if (role !== "provider") return;
+
+    const providerId = getCurrentProviderId();
+    const ownedServices = services.filter((service) => belongsToCurrentProvider(service, providerId));
+    if (!ownedServices.length) return;
+
+    await Promise.all(
+      ownedServices.map((service) =>
+        updateServiceFirestore(service._id, { providerProfilePhoto: profilePhoto || "" })
+      )
+    );
+    notifyServicesUpdated();
+  };
+
   useEffect(() => {
     const providerId = getCurrentProviderId();
     if (!providerId) {
@@ -201,8 +217,9 @@ const ProviderDashboard = () => {
     try {
       const dataUrl = await readFileAsDataUrl(file);
       if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: dataUrl });
+      await syncProviderPhotoAcrossServices(dataUrl);
       await refreshProfile();
-      showSuccess("Profile photo updated.");
+      showSuccess("Profile photo updated across your services.");
     } catch (err) {
       showError(err?.message || "Failed to update profile photo.");
     }
@@ -212,8 +229,9 @@ const ProviderDashboard = () => {
   const handleRemoveProfilePhoto = async () => {
     try {
       if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: "" });
+      await syncProviderPhotoAcrossServices("");
       await refreshProfile();
-      showSuccess("Profile photo removed.");
+      showSuccess("Profile photo removed from your profile and services.");
     } catch (err) {
       showError(err?.message || "Failed to remove profile photo.");
     }

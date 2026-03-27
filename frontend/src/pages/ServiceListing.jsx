@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { subscribeServices } from "../firebase/firestoreServices";
+import { getUserProfile, subscribeServices } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
+import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const ServiceListing = () => {
@@ -14,6 +15,7 @@ const ServiceListing = () => {
   const role = user ? String(user.role || "").toLowerCase() : "";
 
   const [services, setServices] = useState([]);
+  const [providerProfiles, setProviderProfiles] = useState({});
   const [searchInputs, setSearchInputs] = useState({
     selectedCategory: "All",
     location: "",
@@ -46,6 +48,33 @@ const ServiceListing = () => {
       if (typeof unsub === "function") unsub();
     };
   }, [appliedFilters]);
+
+  useEffect(() => {
+    const providerIds = [...new Set(services.map(getServiceProviderId).filter(Boolean))];
+    if (!providerIds.length) {
+      setProviderProfiles({});
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadProfiles = async () => {
+      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      if (cancelled) return;
+      const nextProfiles = profiles.reduce((acc, profile) => {
+        const providerId = getEntityId(profile);
+        if (providerId) acc[providerId] = profile;
+        return acc;
+      }, {});
+      setProviderProfiles(nextProfiles);
+    };
+
+    loadProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [services]);
 
   const handleBookingClick = (serviceId) => {
     if (!user) {
@@ -106,13 +135,6 @@ const ServiceListing = () => {
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
     return n.slice(0, 2).toUpperCase();
   };
-
-  const getProviderPhoto = (service) =>
-    service?.providerProfilePhoto ||
-    service?.providerId?.profilePhoto ||
-    service?.provider?.profilePhoto ||
-    service?.createdBy?.profilePhoto ||
-    "";
 
   const formatPhoneForWhatsApp = (phone) => {
     const p = (phone || "").replace(/\D/g, "");
@@ -233,7 +255,7 @@ const ServiceListing = () => {
   return (
     <div className="page-shell services-page">
       <header className="services-page__header">
-        <h1 className="services-page__title">Available Services</h1>
+        <h1 className="services-page__title">Available Services provided in Liberia</h1>
         <p className="services-page__subtitle">Find and book trusted local services. Filter by category, location, or price.</p>
       </header>
 
@@ -341,7 +363,7 @@ const ServiceListing = () => {
             const location = getServiceLocation(service) || getProviderAddress(service);
             const locationDisplay = location && location !== "Not provided" ? location : "";
             const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
-            const providerPhoto = getProviderPhoto(service);
+            const providerPhoto = getLiveProviderPhoto(service, providerProfiles);
             const firstImageUrl = getFirstServiceImageUrl(service);
 
             return (
