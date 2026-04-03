@@ -3423,6 +3423,25 @@
   text-decoration: underline;
 }
 
+.login-main-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.login-main-footer .auth-footer__text {
+  margin: 0;
+}
+
+.login-main-page .auth-btn--primary {
+  background: var(--brand-red);
+}
+
+.login-main-page .auth-btn--primary:hover {
+  background: var(--brand-red-hover);
+}
+
 .auth-error {
   margin: 16px 28px 0;
   padding: 12px 14px;
@@ -3742,6 +3761,10 @@
   box-shadow: 0 20px 50px rgba(0, 40, 104, 0.08);
 }
 
+.login-card {
+  padding: 28px 32px;
+}
+
 .login-title,
 .register-title,
 .forgot-title {
@@ -3752,12 +3775,20 @@
   letter-spacing: -0.02em;
 }
 
+.login-title {
+  margin-bottom: 16px;
+}
+
 .login-form,
 .register-form,
 .forgot-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.login-form {
+  gap: 12px;
 }
 
 .login-label,
@@ -3810,10 +3841,37 @@
   border-radius: 12px;
 }
 
-.forgot-link {
-  display: block;
+.login-submit-btn {
+  height: 42px;
+  padding: 0 20px;
+  font-size: 0.9rem;
+  background: var(--brand-red);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+  box-shadow: none;
+  transform: none;
+}
+
+.login-submit-btn:hover {
+  background: var(--brand-red-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.login-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 16px;
   text-align: center;
+}
+
+.forgot-link {
   font-size: 0.875rem;
   color: var(--brand-blue);
   text-decoration: none;
@@ -3821,6 +3879,11 @@
 
 .forgot-link:hover {
   text-decoration: underline;
+}
+
+.login-links-separator {
+  font-size: 0.875rem;
+  color: var(--text-muted);
 }
 
 .login-error {

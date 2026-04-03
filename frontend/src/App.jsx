@@ -7,6 +7,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
 
 const AuthPage = lazy(() => import("./pages/AuthPage"));
+const Login = lazy(() => import("./pages/Login"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const RegisterAdmin = lazy(() => import("./pages/RegisterAdmin"));
 const AdminLoginPage = lazy(() => import("./pages/AdminLoginPage"));
@@ -56,7 +57,7 @@ const AppRoutes = () => {
 
         {/* Public Routes */}
         <Route path="/" element={withSuspense(<ServiceListing />)} />
-        <Route path="/login" element={withSuspense(<AuthPage />)} />
+        <Route path="/login" element={withSuspense(<Login />)} />
         <Route path="/register" element={withSuspense(<AuthPage />)} />
         <Route path="/register-admin" element={withSuspense(<RegisterAdmin />)} />
         <Route path="/admin-login" element={withSuspense(<AdminLoginPage />)} />
