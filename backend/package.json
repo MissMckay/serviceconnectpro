@@ -20,6 +20,7 @@
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.1",
+    "path-to-regexp": "^8.4.2",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {

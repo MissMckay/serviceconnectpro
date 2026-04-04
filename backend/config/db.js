@@ -69,13 +69,21 @@ const connectDB = async () => {
             const code = error?.code || "";
             const syscall = error?.syscall || "";
             const reasonType = error?.reason?.type || error?.cause?.type || "";
+            const lowerMessage = message.toLowerCase();
+            const tlsCode = error?.cause?.code || error?.code || "";
             const isSrvRefused = syscall === "querySrv" && (code === "ECONNREFUSED" || code === "ENOTFOUND");
+            const isTlsHandshakeIssue =
+                tlsCode === "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR" ||
+                lowerMessage.includes("tlsv1 alert internal error") ||
+                lowerMessage.includes("ssl routines") ||
+                lowerMessage.includes("alert number 80");
             const isAtlasNetworkAccessIssue =
-                error?.name === "MongooseServerSelectionError" ||
+                (error?.name === "MongooseServerSelectionError" && !isTlsHandshakeIssue) ||
                 reasonType === "ReplicaSetNoPrimary" ||
-                message.toLowerCase().includes("whitelist") ||
-                message.toLowerCase().includes("replicasetnoprimary") ||
-                message.toLowerCase().includes("could not connect to any servers");
+                lowerMessage.includes("whitelist") ||
+                lowerMessage.includes("ip that isn't whitelisted") ||
+                lowerMessage.includes("replicasetnoprimary") ||
+                lowerMessage.includes("could not connect to any servers");
 
             console.error(`MongoDB connection attempt ${attempt} of ${maxRetries} failed.`);
 
@@ -87,6 +95,15 @@ const connectDB = async () => {
                     "Copy it, replace <password> with your DB password, add /serviceconnect before the ? if missing.\n" +
                     "Then in .env set MONGO_URI_STANDARD=<that string> and leave MONGO_URI as is (or remove it)."
                 );
+            } else if (isTlsHandshakeIssue) {
+                console.error("");
+                console.error(">>> FIX: Atlas TLS handshake failed <<<");
+                console.error("1. First confirm your current IP is allowed in Atlas -> Security -> Network Access.");
+                console.error("2. If the IP is already allowed, restart the backend after waiting 1-2 minutes for Atlas to apply the rule.");
+                console.error("3. If it still fails, verify your Atlas connection string from Connect -> Drivers exactly matches this cluster.");
+                console.error(`4. Current runtime is Node ${process.version}. If the issue continues, retry on Node 20 LTS or Node 22 LTS.`);
+                console.error("5. If your network inspects TLS traffic, try another network or add MONGO_URI_STANDARD from Atlas for testing.");
+                console.error("");
             } else if (isAtlasNetworkAccessIssue) {
                 console.error("");
                 console.error(">>> FIX: Allow your IP in MongoDB Atlas <<<");
