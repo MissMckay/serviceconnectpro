@@ -4559,7 +4559,7 @@
   }
 
   .dashboard-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -4568,7 +4568,7 @@
   }
 
   .service-listing-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .service-listing-search {
@@ -4639,7 +4639,7 @@
 
 @media (max-width: 540px) {
   .service-listing-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -4668,14 +4668,14 @@
 
 @media (max-width: 768px) {
   .service-listing-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 }
 
 @media (max-width: 480px) {
   .service-listing-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
