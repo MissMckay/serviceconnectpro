@@ -4670,6 +4670,31 @@
   transform: translateY(-3px);
 }
 
+.sc-card--skeleton {
+  pointer-events: none;
+}
+
+.sc-card--skeleton:hover {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  border-color: #e5e7eb;
+  transform: none;
+}
+
+.sc-card__image-skeleton,
+.sc-card__avatar-skeleton,
+.sc-card__pill-skeleton,
+.sc-card__line-skeleton,
+.sc-card__button-skeleton {
+  background: linear-gradient(90deg, #eef2f7 20%, #e2e8f0 50%, #eef2f7 80%);
+  background-size: 200% 100%;
+  animation: sc-card-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes sc-card-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 .sc-card__image-wrap {
   position: relative;
   width: 100%;
@@ -4683,6 +4708,11 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.sc-card__image-skeleton {
+  width: 100%;
+  height: 100%;
 }
 
 .sc-card__image-placeholder {
@@ -4710,6 +4740,13 @@
   justify-content: center;
   overflow: hidden;
   box-shadow: 0 2px 6px rgba(0, 40, 104, 0.25);
+}
+
+.sc-card__avatar-skeleton {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
 }
 
 .sc-card__provider-avatar {
@@ -4740,6 +4777,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.sc-card__pill-skeleton {
+  width: 92px;
+  height: 26px;
+  border-radius: 8px;
+}
+
+.sc-card__pill-skeleton--short {
+  width: 74px;
 }
 
 .sc-card__tag {
@@ -4778,6 +4825,38 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   letter-spacing: -0.01em;
+}
+
+.sc-card__line-skeleton {
+  height: 12px;
+  border-radius: 999px;
+  margin-bottom: 10px;
+}
+
+.sc-card__line-skeleton--title {
+  width: 78%;
+  height: 22px;
+  margin-bottom: 14px;
+}
+
+.sc-card__line-skeleton--short {
+  width: 64%;
+}
+
+.sc-card__line-skeleton--provider {
+  width: 52%;
+  margin-bottom: 6px;
+}
+
+.sc-card__line-skeleton--location {
+  width: 68%;
+  margin-bottom: 0;
+}
+
+.sc-card__line-skeleton--price {
+  width: 92px;
+  height: 24px;
+  margin-bottom: 0;
 }
 
 .sc-card__desc {
@@ -4857,6 +4936,16 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.sc-card__button-skeleton {
+  width: 110px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.sc-card__button-skeleton--primary {
+  width: 96px;
 }
 
 .sc-card__btn {

@@ -9,6 +9,8 @@ import { getServiceSearchLocations, matchesLocationQuery } from "../utils/servic
 import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
+const INITIAL_SKELETON_COUNT = 6;
+
 const ServiceListing = () => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
@@ -103,10 +105,27 @@ const ServiceListing = () => {
       setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
     };
 
-    loadProfiles();
+    let timeoutId;
+    let idleId;
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      idleId = window.requestIdleCallback(() => {
+        loadProfiles();
+      }, { timeout: 1200 });
+    } else {
+      timeoutId = window.setTimeout(() => {
+        loadProfiles();
+      }, 250);
+    }
 
     return () => {
       cancelled = true;
+      if (typeof idleId === "number" && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId);
+      }
+      if (typeof timeoutId === "number") {
+        window.clearTimeout(timeoutId);
+      }
     };
   }, [services]);
 
@@ -183,6 +202,7 @@ const ServiceListing = () => {
   };
 
   const DESCRIPTION_PREVIEW_LENGTH = 110;
+  const showInitialSkeletons = isLoading && services.length === 0 && !error;
 
   const categories = [
     "All",
@@ -459,6 +479,48 @@ const ServiceListing = () => {
               </article>
             );
           })}
+        </div>
+      )}
+
+      {showInitialSkeletons && (
+        <div className="service-listing-grid" aria-hidden="true">
+          {Array.from({ length: INITIAL_SKELETON_COUNT }).map((_, index) => (
+            <article key={`service-skeleton-${index}`} className="sc-card sc-card--skeleton">
+              <div className="sc-card__image-wrap">
+                <div className="sc-card__image-skeleton" />
+              </div>
+
+              <div className="sc-card__content">
+                <div className="sc-card__tags-row">
+                  <div className="sc-card__tags">
+                    <span className="sc-card__pill-skeleton" />
+                    <span className="sc-card__pill-skeleton sc-card__pill-skeleton--short" />
+                  </div>
+                  <span className="sc-card__avatar-skeleton" />
+                </div>
+
+                <div className="sc-card__line-skeleton sc-card__line-skeleton--title" />
+                <div className="sc-card__line-skeleton" />
+                <div className="sc-card__line-skeleton sc-card__line-skeleton--short" />
+
+                <div className="sc-card__provider">
+                  <span className="sc-card__line-skeleton sc-card__line-skeleton--provider" />
+                  <span className="sc-card__line-skeleton sc-card__line-skeleton--location" />
+                </div>
+
+                <div className="sc-card__bottom">
+                  <div className="sc-card__price-rating">
+                    <span className="sc-card__line-skeleton sc-card__line-skeleton--price" />
+                  </div>
+
+                  <div className="sc-card__actions">
+                    <span className="sc-card__button-skeleton" />
+                    <span className="sc-card__button-skeleton sc-card__button-skeleton--primary" />
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
       )}
 

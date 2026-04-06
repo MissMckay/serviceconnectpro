@@ -6,8 +6,8 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
 import { prewarmPublicData } from "./firebase/firestoreServices";
+import ServiceListing from "./pages/ServiceListing";
 
-const ServiceListing = lazy(() => import("./pages/ServiceListing"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const Login = lazy(() => import("./pages/Login"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
