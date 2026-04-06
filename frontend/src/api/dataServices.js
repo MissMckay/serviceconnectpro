@@ -2,8 +2,12 @@ import api from "./client";
 
 const POLL_MS = 10000;
 const CACHE_TTL_MS = 15000;
+const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
+const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
 const responseCache = new Map();
 const inflightRequests = new Map();
+let publicDataPrewarmPromise = null;
+let publicServicesSnapshotMemory = [];
 
 function noopUnsub() {}
 
@@ -18,6 +22,81 @@ function clearCacheByPrefix(prefix) {
   Array.from(inflightRequests.keys()).forEach((key) => {
     if (key.startsWith(prefix)) inflightRequests.delete(key);
   });
+}
+
+function getStorage() {
+  if (typeof window === "undefined") return null;
+  if (typeof window.localStorage !== "undefined") return window.localStorage;
+  if (typeof window.sessionStorage !== "undefined") return window.sessionStorage;
+  return null;
+}
+
+function canUseStorage() {
+  return Boolean(getStorage());
+}
+
+function normalizeServiceList(list) {
+  return list.map((s) => ({
+    _id: s._id,
+    id: s._id,
+    ...s,
+    createdAt: s.createdAt ? new Date(s.createdAt) : null,
+    thumbnailUrl: s.thumbnailUrl || (Array.isArray(s.images) && s.images[0]?.imageUrl) || null,
+  }));
+}
+
+function writePublicServicesSnapshot(filters, services) {
+  if (!canUseStorage() || filters && Object.keys(filters).length > 0) {
+    return;
+  }
+
+  try {
+    publicServicesSnapshotMemory = normalizeServiceList(Array.isArray(services) ? services : []);
+    getStorage().setItem(
+      PUBLIC_SERVICES_STORAGE_KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
+        services: publicServicesSnapshotMemory,
+      })
+    );
+  } catch {
+    // Ignore storage quota and serialization failures.
+  }
+}
+
+function clearPublicServicesSnapshot() {
+  publicServicesSnapshotMemory = [];
+  if (!canUseStorage()) return;
+
+  try {
+    getStorage().removeItem(PUBLIC_SERVICES_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures while clearing stale cache.
+  }
+}
+
+export function getPublicServicesSnapshot() {
+  if (publicServicesSnapshotMemory.length) {
+    return publicServicesSnapshotMemory;
+  }
+
+  if (!canUseStorage()) return [];
+
+  try {
+    const raw = getStorage().getItem(PUBLIC_SERVICES_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > PUBLIC_SERVICES_STORAGE_TTL_MS) {
+      getStorage().removeItem(PUBLIC_SERVICES_STORAGE_KEY);
+      return [];
+    }
+
+    publicServicesSnapshotMemory = normalizeServiceList(Array.isArray(parsed.services) ? parsed.services : []);
+    return publicServicesSnapshotMemory;
+  } catch {
+    return [];
+  }
 }
 
 async function getCachedOrFetch(cacheKey, fetcher, { forceFresh = false, ttlMs = CACHE_TTL_MS } = {}) {
@@ -138,11 +217,16 @@ export function servicesRef() {
 
 export async function getServices(filters = {}) {
   const options = filters?.__options || {};
+  const normalizedFilters = {};
+  if (filters.category && filters.category !== "All") normalizedFilters.category = filters.category;
+  if (filters.minPrice != null && filters.minPrice !== "") normalizedFilters.minPrice = filters.minPrice;
+  if (filters.maxPrice != null && filters.maxPrice !== "") normalizedFilters.maxPrice = filters.maxPrice;
+  if (filters.location && String(filters.location).trim()) normalizedFilters.location = filters.location;
   const params = new URLSearchParams();
-  if (filters.category && filters.category !== "All") params.set("category", filters.category);
-  if (filters.minPrice != null && filters.minPrice !== "") params.set("minPrice", filters.minPrice);
-  if (filters.maxPrice != null && filters.maxPrice !== "") params.set("maxPrice", filters.maxPrice);
-  if (filters.location && String(filters.location).trim()) params.set("location", filters.location);
+  if (normalizedFilters.category) params.set("category", normalizedFilters.category);
+  if (normalizedFilters.minPrice != null) params.set("minPrice", normalizedFilters.minPrice);
+  if (normalizedFilters.maxPrice != null) params.set("maxPrice", normalizedFilters.maxPrice);
+  if (normalizedFilters.location) params.set("location", normalizedFilters.location);
   const q = params.toString();
   const path = `services${q ? `?${q}` : ""}`;
   return getCachedOrFetch(
@@ -151,19 +235,37 @@ export async function getServices(filters = {}) {
       const res = await api.get(path);
       const payload = res?.data ?? res;
       const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-      return list.map((s) => ({
-        _id: s._id,
-        id: s._id,
-        ...s,
-        createdAt: s.createdAt ? new Date(s.createdAt) : null,
-        thumbnailUrl: s.thumbnailUrl || (Array.isArray(s.images) && s.images[0]?.imageUrl) || null,
-      }));
+      const normalizedList = normalizeServiceList(list);
+      writePublicServicesSnapshot(normalizedFilters, normalizedList);
+      return normalizedList;
     },
     options
   );
 }
 
+export function prewarmPublicData() {
+  if (!publicDataPrewarmPromise) {
+    publicDataPrewarmPromise = getServices().catch(() => null);
+  }
+  return publicDataPrewarmPromise;
+}
+
 export function subscribeServices(filters, setData) {
+  const normalizedFilters = {
+    category: filters?.category,
+    minPrice: filters?.minPrice,
+    maxPrice: filters?.maxPrice,
+    location: filters?.location,
+  };
+  const hasActiveFilters = Object.values(normalizedFilters).some((value) => value != null && value !== "" && value !== "All");
+
+  if (!hasActiveFilters) {
+    const cachedSnapshot = getPublicServicesSnapshot();
+    if (cachedSnapshot.length && setData) {
+      setData(cachedSnapshot);
+    }
+  }
+
   const fetchList = async (forceFresh = false) => {
     try {
       const list = await getServices({ ...(filters || {}), __options: { forceFresh } });
@@ -211,6 +313,7 @@ export async function createService(providerId, data) {
   };
   const res = await api.post("services", body);
   clearCacheByPrefix("services:");
+  clearPublicServicesSnapshot();
   const payload = res?.data ?? res;
   const service = payload?.data ?? payload;
   return { serviceId: service?._id || service?.id, imagesSkipped: false };
@@ -228,12 +331,14 @@ export async function updateService(serviceId, data) {
   await api.put(`services/${serviceId}`, body);
   clearCacheByPrefix("services:");
   clearCacheByPrefix(getCacheKey("service", serviceId));
+  clearPublicServicesSnapshot();
 }
 
 export async function deleteService(serviceId) {
   await api.delete(`services/${serviceId}`);
   clearCacheByPrefix("services:");
   clearCacheByPrefix(getCacheKey("service", serviceId));
+  clearPublicServicesSnapshot();
 }
 
 // ---------- Bookings ----------

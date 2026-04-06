@@ -10,6 +10,8 @@ export {
   subscribeUsers,
   servicesRef,
   getServices,
+  getPublicServicesSnapshot,
+  prewarmPublicData,
   subscribeServices,
   getServiceById,
   createService,

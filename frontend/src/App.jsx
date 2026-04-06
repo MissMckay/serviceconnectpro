@@ -1,17 +1,18 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import "./design-system.css";
 import "./App.css";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
+import { prewarmPublicData } from "./firebase/firestoreServices";
 
+const ServiceListing = lazy(() => import("./pages/ServiceListing"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const Login = lazy(() => import("./pages/Login"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const RegisterAdmin = lazy(() => import("./pages/RegisterAdmin"));
 const AdminLoginPage = lazy(() => import("./pages/AdminLoginPage"));
-const ServiceListing = lazy(() => import("./pages/ServiceListing"));
 const ServiceDetails = lazy(() => import("./pages/ServiceDetails"));
 const BookingPage = lazy(() => import("./pages/BookingPage"));
 const ReviewPage = lazy(() => import("./pages/ReviewPage"));
@@ -163,6 +164,10 @@ const AppRoutes = () => {
 };
 
 function App() {
+  useEffect(() => {
+    prewarmPublicData();
+  }, []);
+
   return (
     <Router>
       <AppRoutes />

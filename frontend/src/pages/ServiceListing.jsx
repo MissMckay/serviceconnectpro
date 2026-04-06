@@ -1,9 +1,9 @@
-import { useEffect, useState, useRef, useContext } from "react";
+import { useEffect, useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { getUserProfile, subscribeServices } from "../firebase/firestoreServices";
+import { getPublicServicesSnapshot, getUserProfile, subscribeServices } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
-import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
+import { getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
 import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
@@ -13,8 +13,9 @@ const ServiceListing = () => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const role = user ? String(user.role || "").toLowerCase() : "";
+  const initialServices = getPublicServicesSnapshot();
 
-  const [services, setServices] = useState([]);
+  const [services, setServices] = useState(initialServices);
   const [providerProfiles, setProviderProfiles] = useState({});
   const [searchInputs, setSearchInputs] = useState({
     selectedCategory: "All",
@@ -28,7 +29,7 @@ const ServiceListing = () => {
     minPrice: "",
     maxPrice: ""
   });
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(initialServices.length === 0);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -58,15 +59,48 @@ const ServiceListing = () => {
 
     let cancelled = false;
 
+    const embeddedProfiles = services.reduce((acc, service) => {
+      const providerId = getServiceProviderId(service);
+      if (!providerId) return acc;
+
+      const embeddedProfile =
+        (typeof service?.providerId === "object" && service.providerId) ||
+        service?.provider ||
+        service?.createdBy ||
+        service?.owner;
+
+      if (!embeddedProfile || typeof embeddedProfile !== "object") {
+        return acc;
+      }
+
+      acc[providerId] = {
+        id: providerId,
+        _id: providerId,
+        ...embeddedProfile,
+      };
+      return acc;
+    }, {});
+
+    setProviderProfiles((prev) => ({ ...prev, ...embeddedProfiles }));
+
+    const missingProviderIds = providerIds.filter((providerId) => {
+      const embedded = embeddedProfiles[providerId];
+      return !embedded?.profilePhoto && !embedded?.name && !embedded?.fullName;
+    });
+
+    if (!missingProviderIds.length) {
+      return undefined;
+    }
+
     const loadProfiles = async () => {
-      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      const profiles = await Promise.all(missingProviderIds.map((providerId) => getUserProfile(providerId)));
       if (cancelled) return;
       const nextProfiles = profiles.reduce((acc, profile) => {
         const providerId = getEntityId(profile);
         if (providerId) acc[providerId] = profile;
         return acc;
       }, {});
-      setProviderProfiles(nextProfiles);
+      setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
     };
 
     loadProfiles();
@@ -141,36 +175,6 @@ const ServiceListing = () => {
     return p ? p : null;
   };
 
-  const getReviewerName = (review) =>
-    review?.userId?.name ||
-    review?.user?.name ||
-    review?.reviewerName ||
-    review?.name ||
-    "Anonymous";
-
-  const getReviewTimestamp = (review) => {
-    if (!review || typeof review === "string") {
-      return 0;
-    }
-
-    const rawDate = review?.createdAt || review?.updatedAt || review?.date;
-    const timestamp = rawDate ? new Date(rawDate).getTime() : 0;
-    return Number.isFinite(timestamp) ? timestamp : 0;
-  };
-
-  const formatReviewDate = (review) => {
-    const timestamp = getReviewTimestamp(review);
-    if (!timestamp) {
-      return "";
-    }
-
-    return new Date(timestamp).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-  };
-
   const getWhatsAppUrl = (phone) => {
     const num = formatPhoneForWhatsApp(phone);
     if (!num) return null;
@@ -179,29 +183,6 @@ const ServiceListing = () => {
   };
 
   const DESCRIPTION_PREVIEW_LENGTH = 110;
-
-  // Single large service image (first image only)
-  const renderMediaPreview = (service) => {
-    const media = getServiceMedia(service) || [];
-    const first = media.find((m) => m?.url);
-
-    if (!first?.url) {
-      return (
-        <div className="service-card-hero-image service-card-hero-placeholder">
-          No image
-        </div>
-      );
-    }
-
-    return (
-      <div className="service-card-hero-image">
-        <img
-          src={first.url}
-          alt={service.serviceName}
-        />
-      </div>
-    );
-  };
 
   const categories = [
     "All",

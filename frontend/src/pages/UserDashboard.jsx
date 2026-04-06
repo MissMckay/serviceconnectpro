@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { getServices, getUserProfile, updateUserProfile } from "../firebase/firestoreServices";
+import { getPublicServicesSnapshot, getServices, getUserProfile, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
@@ -13,9 +13,10 @@ import WhatsAppIcon from "../components/WhatsAppIcon";
 const UserDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [services, setServices] = useState([]);
+  const initialServices = getPublicServicesSnapshot();
+  const [services, setServices] = useState(initialServices);
   const [providerProfiles, setProviderProfiles] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(initialServices.length === 0);
   const [error, setError] = useState("");
   const [categoryInput, setCategoryInput] = useState("All");
   const [locationInput, setLocationInput] = useState("");
