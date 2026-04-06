@@ -306,11 +306,6 @@ const ServiceListing = () => {
         </div>
       </form>
 
-      {isLoading && (
-        <div className="service-listing-loading">
-          <p>Loading services...</p>
-        </div>
-      )}
       {!isLoading && error && (
         <div className="service-listing-error">
           <p style={{ color: "var(--brand-red)" }}>{error}</p>

@@ -348,7 +348,6 @@ const UserDashboard = () => {
                   </button>
                 </form>
 
-                {isLoading && <p>Loading services...</p>}
                 {!isLoading && error && <p className="dashboard-error">{error}</p>}
 
                 {!error && (
