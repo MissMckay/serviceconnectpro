@@ -337,6 +337,7 @@ const ServiceListing = () => {
 
   return (
     <div className="page-shell services-page">
+<<<<<<< HEAD
       <button
         type="button"
         className={`services-summary-backdrop ${isSummaryOpen ? "is-open" : ""}`}
@@ -351,6 +352,75 @@ const ServiceListing = () => {
           </div>
           <button type="button" className="services-summary-drawer__close" onClick={() => setIsSummaryOpen(false)}>
             Close
+=======
+      <header className="services-page__header">
+        <h1 className="services-page__title">Available Services provided in Liberia</h1>
+        <p className="services-page__subtitle">Find and book trusted local services. Filter by category, location, or price.</p>
+      </header>
+
+      <form className="services-search" onSubmit={handleSearch}>
+        <div className="services-search__field">
+          <label htmlFor="services-category" className="services-search__label">Category</label>
+          <select
+            id="services-category"
+            className="services-search__input"
+            value={searchInputs.selectedCategory}
+            onChange={(e) =>
+              setSearchInputs((prev) => ({ ...prev, selectedCategory: e.target.value }))
+            }
+          >
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-location" className="services-search__label">Location</label>
+          <input
+            id="services-location"
+            list="service-location-options"
+            type="text"
+            className="services-search__input"
+            placeholder="City or area"
+            value={searchInputs.location}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, location: e.target.value }))}
+          />
+          <datalist id="service-location-options">
+            {locationSuggestions.map((location) => (
+              <option key={location} value={location} />
+            ))}
+          </datalist>
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-min-price" className="services-search__label">Min price (LRD)</label>
+          <input
+            id="services-min-price"
+            type="number"
+            min="0"
+            className="services-search__input"
+            placeholder="0"
+            value={searchInputs.minPrice}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
+          />
+        </div>
+        <div className="services-search__field">
+          <label htmlFor="services-max-price" className="services-search__label">Max price (LRD)</label>
+          <input
+            id="services-max-price"
+            type="number"
+            min="0"
+            className="services-search__input"
+            placeholder="Any"
+            value={searchInputs.maxPrice}
+            onChange={(e) => setSearchInputs((prev) => ({ ...prev, maxPrice: e.target.value }))}
+          />
+        </div>
+        <div className="services-search__action">
+          <button type="submit" className="services-search__btn">
+            Apply filters
+>>>>>>> parent of 77be243 (service cards edit)
           </button>
         </div>
 
@@ -669,7 +739,7 @@ const ServiceListing = () => {
                         className="sc-card__btn sc-card__btn--secondary"
                         onClick={() => handleReviewClick(service._id, service)}
                       >
-                        Details
+                        View details
                       </button>
                       {(role === "user" || !role) && (
                         <button

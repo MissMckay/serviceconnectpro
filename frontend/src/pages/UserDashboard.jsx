@@ -488,7 +488,7 @@ const UserDashboard = () => {
                                   className="sc-card__btn sc-card__btn--secondary"
                                   onClick={() => navigate(`/services/${service._id}`, { state: { service } })}
                                 >
-                                  Details
+                                  View details
                                 </button>
                                 <button
                                   type="button"
