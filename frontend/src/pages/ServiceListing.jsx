@@ -36,14 +36,11 @@ const ServiceListing = () => {
   const [activeQuickFilter, setActiveQuickFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(initialServices.length === 0);
   const [error, setError] = useState("");
-  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
     let unsub;
-    setIsLoading(true);
-    setError("");
     try {
-      unsub = subscribeServices({}, (list) => {
+      unsub = subscribeServices(appliedFilters, (list) => {
         setServices(list);
         setError("");
         setIsLoading(false);
@@ -56,7 +53,7 @@ const ServiceListing = () => {
     return () => {
       if (typeof unsub === "function") unsub();
     };
-  }, [reloadCount]);
+  }, [appliedFilters]);
 
   useEffect(() => {
     const providerIds = [...new Set(services.map(getServiceProviderId).filter(Boolean))];
@@ -541,7 +538,7 @@ const ServiceListing = () => {
           <button
             type="button"
             className="service-listing-retry-btn"
-            onClick={() => setReloadCount((count) => count + 1)}
+            onClick={() => setIsLoading(true)}
           >
             Retry
           </button>
