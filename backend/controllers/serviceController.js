@@ -172,8 +172,8 @@ const listCache = new Map();
 const LIST_CACHE_TTL_MS = 5000;
 const MONGO_CONNECTED_STATE = 1;
 
-const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "") =>
-  `${page}|${limit}|${category}|${minPrice}|${maxPrice}|${location}`;
+const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "", providerId = "") =>
+  `${page}|${limit}|${category}|${minPrice}|${maxPrice}|${location}|${providerId}`;
 
 const getFallbackServicesPayload = (page, limit, cachedPayload) => {
   if (cachedPayload) return cachedPayload;
@@ -198,7 +198,8 @@ exports.getAllServices = asyncHandler(async (req, res) => {
   const minPrice = parseInt(req.query.minPrice, 10);
   const maxPrice = parseInt(req.query.maxPrice, 10);
   const location = typeof req.query.location === "string" ? req.query.location.trim().toLowerCase() : "";
-  const cacheKey = getCacheKey(page, limit, category, minPrice, maxPrice, location);
+  const providerId = typeof req.query.providerId === "string" ? req.query.providerId.trim() : "";
+  const cacheKey = getCacheKey(page, limit, category, minPrice, maxPrice, location, providerId);
 
   const cached = listCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
@@ -219,6 +220,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     if (Number.isFinite(minPrice) && minPrice >= 0) filter.price = { ...(filter.price || {}), $gte: minPrice };
     if (Number.isFinite(maxPrice) && maxPrice >= 0) filter.price = { ...(filter.price || {}), $lte: maxPrice };
     if (location) filter.providerAddress = { $regex: location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+    if (providerId) filter.providerId = providerId;
 
     const fetchLimit = limit + 1;
     const rawServices = await Service.find(filter)

@@ -13,9 +13,27 @@ const server = http.createServer(app);
 
 const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
 const corsOrigins = corsOrigin.split(",").map((o) => o.trim()).filter(Boolean);
+const corsOriginRegex = process.env.CORS_ORIGIN_REGEX || "";
+const corsOriginPatterns = corsOriginRegex
+  .split(",")
+  .map((pattern) => pattern.trim())
+  .filter(Boolean)
+  .map((pattern) => new RegExp(pattern));
 
 const corsOptions = {
-  origin: corsOrigins,
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    if (corsOrigins.includes(origin) || corsOriginPatterns.some((pattern) => pattern.test(origin))) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true,
 };

@@ -45,6 +45,54 @@ function normalizeServiceList(list) {
   }));
 }
 
+function extractServicesPayload(payload) {
+  const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+  const pagination = payload?.pagination || payload?.meta || {};
+  return { list, pagination };
+}
+
+function normalizeServiceFilters(filters = {}) {
+  const rawCategory = filters?.category ?? filters?.selectedCategory;
+  const rawLocation = filters?.location;
+  const rawMinPrice = filters?.minPrice;
+  const rawMaxPrice = filters?.maxPrice;
+  const rawProviderId = filters?.providerId;
+
+  const category =
+    typeof rawCategory === "string" && rawCategory.trim() && rawCategory.trim() !== "All"
+      ? rawCategory.trim()
+      : undefined;
+  const location =
+    typeof rawLocation === "string" && rawLocation.trim()
+      ? rawLocation.trim()
+      : undefined;
+  const providerId =
+    typeof rawProviderId === "string" && rawProviderId.trim()
+      ? rawProviderId.trim()
+      : undefined;
+
+  let minPrice =
+    rawMinPrice != null && rawMinPrice !== "" && Number.isFinite(Number(rawMinPrice))
+      ? Number(rawMinPrice)
+      : undefined;
+  let maxPrice =
+    rawMaxPrice != null && rawMaxPrice !== "" && Number.isFinite(Number(rawMaxPrice))
+      ? Number(rawMaxPrice)
+      : undefined;
+
+  if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
+    [minPrice, maxPrice] = [maxPrice, minPrice];
+  }
+
+  return {
+    category,
+    location,
+    providerId,
+    minPrice,
+    maxPrice
+  };
+}
+
 function writePublicServicesSnapshot(filters, services) {
   if (!canUseStorage() || filters && Object.keys(filters).length > 0) {
     return;
@@ -217,24 +265,44 @@ export function servicesRef() {
 
 export async function getServices(filters = {}) {
   const options = filters?.__options || {};
-  const normalizedFilters = {};
-  if (filters.category && filters.category !== "All") normalizedFilters.category = filters.category;
-  if (filters.minPrice != null && filters.minPrice !== "") normalizedFilters.minPrice = filters.minPrice;
-  if (filters.maxPrice != null && filters.maxPrice !== "") normalizedFilters.maxPrice = filters.maxPrice;
-  if (filters.location && String(filters.location).trim()) normalizedFilters.location = filters.location;
+  const normalizedFilters = normalizeServiceFilters(filters);
   const params = new URLSearchParams();
   if (normalizedFilters.category) params.set("category", normalizedFilters.category);
   if (normalizedFilters.minPrice != null) params.set("minPrice", normalizedFilters.minPrice);
   if (normalizedFilters.maxPrice != null) params.set("maxPrice", normalizedFilters.maxPrice);
   if (normalizedFilters.location) params.set("location", normalizedFilters.location);
-  const q = params.toString();
-  const path = `services${q ? `?${q}` : ""}`;
+  if (normalizedFilters.providerId) params.set("providerId", normalizedFilters.providerId);
+  params.set("limit", "100");
+  const baseQuery = params.toString();
   return getCachedOrFetch(
-    getCacheKey("services", q),
+    getCacheKey("services", baseQuery),
     async () => {
-      const res = await api.get(path);
-      const payload = res?.data ?? res;
-      const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      const fetchPage = async (page) => {
+        const pageParams = new URLSearchParams(baseQuery);
+        pageParams.set("page", String(page));
+        const res = await api.get(`services?${pageParams.toString()}`);
+        return res?.data ?? res;
+      };
+
+      const firstPayload = await fetchPage(1);
+      const { list: firstList, pagination } = extractServicesPayload(firstPayload);
+      const totalPages = Math.max(
+        Number.parseInt(pagination?.totalPages, 10) || 1,
+        pagination?.hasNextPage ? 2 : 1
+      );
+
+      const remainingPayloads =
+        totalPages > 1
+          ? await Promise.all(
+              Array.from({ length: totalPages - 1 }, (_, index) => fetchPage(index + 2))
+            )
+          : [];
+
+      const list = [
+        ...firstList,
+        ...remainingPayloads.flatMap((payload) => extractServicesPayload(payload).list)
+      ];
+
       const normalizedList = normalizeServiceList(list);
       writePublicServicesSnapshot(normalizedFilters, normalizedList);
       return normalizedList;
@@ -251,12 +319,7 @@ export function prewarmPublicData() {
 }
 
 export function subscribeServices(filters, setData) {
-  const normalizedFilters = {
-    category: filters?.category,
-    minPrice: filters?.minPrice,
-    maxPrice: filters?.maxPrice,
-    location: filters?.location,
-  };
+  const normalizedFilters = normalizeServiceFilters(filters);
   const hasActiveFilters = Object.values(normalizedFilters).some((value) => value != null && value !== "" && value !== "All");
 
   if (!hasActiveFilters) {
@@ -417,6 +480,14 @@ export async function createBooking(userId, data) {
 
 export async function updateBookingStatus(bookingId, status) {
   await api.put(`bookings/${bookingId}`, { status });
+}
+
+export async function cancelBooking(bookingId) {
+  await api.put(`bookings/cancel/${bookingId}`, {});
+}
+
+export async function deleteBooking(bookingId) {
+  await api.delete(`bookings/${bookingId}`);
 }
 
 export async function getBookingById(bookingId) {

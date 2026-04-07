@@ -24,6 +24,8 @@ export {
   subscribeBookingsByProvider,
   createBooking,
   updateBookingStatus,
+  cancelBooking,
+  deleteBooking,
   getBookingById,
   getOrCreateConversation,
   getConversations,

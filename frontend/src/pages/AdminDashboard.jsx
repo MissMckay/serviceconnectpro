@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useContext, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import API from "../services/api";
 import { AuthContext } from "../context/AuthContext";
-import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeUsers, subscribeServices } from "../firebase/firestoreServices";
+import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeServices } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 
@@ -107,6 +107,7 @@ const AdminDashboard = () => {
   const [users, setUsers] = useState([]);
   const [services, setServices] = useState([]);
   const [overviewServices, setOverviewServices] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState(null);
   const [serviceProviderProfiles, setServiceProviderProfiles] = useState({});
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [isServicesLoading, setIsServicesLoading] = useState(false);
@@ -121,6 +122,7 @@ const AdminDashboard = () => {
     status: "all",
     approved: "all"
   });
+  const [usersPage, setUsersPage] = useState(1);
   const [serviceFilters, setServiceFilters] = useState({
     search: "",
     category: "all",
@@ -188,12 +190,7 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     if (!user?.uid) return;
-    setIsUsersLoading(true);
-    const unsub = subscribeUsers((list) => {
-      setUsers(list);
-      setIsUsersLoading(false);
-    }, 2000);
-    return () => { if (typeof unsub === "function") unsub(); };
+    refreshUsers();
   }, [user?.uid]);
 
   useEffect(() => {
@@ -236,6 +233,32 @@ const AdminDashboard = () => {
 
   const showSuccess = (message) => setToast({ type: "success", message });
   const showError = (message) => setToast({ type: "error", message });
+
+  const refreshDashboardStats = async () => {
+    try {
+      const response = await getFirstSuccessfulGet([
+        { path: "/admin/dashboard-stats" },
+        { path: "/admin/stats" },
+        { path: "/admin/dashboard" }
+      ]);
+
+      if (!response) {
+        throw new Error("dashboard-stats-fetch-failed");
+      }
+
+      const payload = response?.data?.data || response?.data || {};
+      setDashboardStats({
+        totalUsers: getNumberFromData(payload, ["totalUsers"]) || 0,
+        totalProviders: getNumberFromData(payload, ["totalProviders"]) || 0,
+        pendingProviders: getNumberFromData(payload, ["pendingProviders"]) || 0,
+        suspendedUsers: getNumberFromData(payload, ["suspendedUsers"]) || 0,
+        totalServices: getNumberFromData(payload, ["totalServices"]) || 0,
+        removedServices: getNumberFromData(payload, ["removedServices"]) || 0
+      });
+    } catch {
+      setDashboardStats(null);
+    }
+  };
 
   const refreshUsers = async () => {
     setIsUsersLoading(true);
@@ -346,6 +369,11 @@ const AdminDashboard = () => {
     refreshServices();
   }, []);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+    refreshDashboardStats();
+  }, [user?.uid]);
+
   const filteredUsers = useMemo(() => {
     const search = normalizeText(usersFilters.search);
     const roleFilter = usersFilters.role !== "all" ? normalizeText(usersFilters.role) : "";
@@ -368,6 +396,25 @@ const AdminDashboard = () => {
     });
   }, [users, usersFilters.search, usersFilters.role, usersFilters.status, usersFilters.approved]);
 
+  const usersPerPage = 10;
+  const usersTotalPages = Math.max(1, Math.ceil(filteredUsers.length / usersPerPage));
+  const safeUsersPage = Math.min(usersPage, usersTotalPages);
+
+  const paginatedUsers = useMemo(() => {
+    const start = (safeUsersPage - 1) * usersPerPage;
+    return filteredUsers.slice(start, start + usersPerPage);
+  }, [filteredUsers, safeUsersPage]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [usersFilters.search, usersFilters.role, usersFilters.status, usersFilters.approved]);
+
+  useEffect(() => {
+    if (usersPage > usersTotalPages) {
+      setUsersPage(usersTotalPages);
+    }
+  }, [usersPage, usersTotalPages]);
+
   useEffect(() => {
     refreshServices();
   }, [
@@ -380,16 +427,20 @@ const AdminDashboard = () => {
   ]);
 
   const refreshAllAdminTables = async () => {
-    await refreshServices();
+    await Promise.all([
+      refreshUsers(),
+      refreshServices(),
+      refreshDashboardStats()
+    ]);
   };
 
-  const usersSummary = useMemo(() => {
+  const localUsersSummary = useMemo(() => {
     const totalUsers = users.length;
-    const totalProviders = users.filter((user) => normalizeText(user?.role) === "provider").length;
+    const totalProviders = users.filter((entry) => normalizeText(entry?.role) === "provider").length;
     const pendingProviders = users.filter(
-      (user) => normalizeText(user?.role) === "provider" && user?.isApproved !== true
+      (entry) => normalizeText(entry?.role) === "provider" && entry?.isApproved !== true
     ).length;
-    const suspendedUsers = users.filter((user) => normalizeText(user?.accountStatus) === "suspended").length;
+    const suspendedUsers = users.filter((entry) => normalizeText(entry?.accountStatus) === "suspended").length;
     return {
       totalUsers,
       totalProviders,
@@ -397,6 +448,22 @@ const AdminDashboard = () => {
       suspendedUsers
     };
   }, [users]);
+
+  const usersSummary = useMemo(
+    () => ({
+      totalUsers: dashboardStats?.totalUsers ?? localUsersSummary.totalUsers,
+      totalProviders: dashboardStats?.totalProviders ?? localUsersSummary.totalProviders,
+      pendingProviders: dashboardStats?.pendingProviders ?? localUsersSummary.pendingProviders,
+      suspendedUsers: dashboardStats?.suspendedUsers ?? localUsersSummary.suspendedUsers
+    }),
+    [
+      dashboardStats,
+      localUsersSummary.totalUsers,
+      localUsersSummary.totalProviders,
+      localUsersSummary.pendingProviders,
+      localUsersSummary.suspendedUsers
+    ]
+  );
 
   const overviewUserMenus = useMemo(() => {
     const providerUsers = users.filter((entry) => normalizeText(entry?.role) === "provider");
@@ -440,10 +507,10 @@ const AdminDashboard = () => {
   const reportsSummary = useMemo(
     () => ({
       ...usersSummary,
-      totalServices: servicePagination.total || services.length,
-      removedServices: removedServicesCount
+      totalServices: dashboardStats?.totalServices ?? servicePagination.total ?? services.length,
+      removedServices: dashboardStats?.removedServices ?? removedServicesCount
     }),
-    [usersSummary, servicePagination.total, services.length, removedServicesCount]
+    [dashboardStats, usersSummary, servicePagination.total, services.length, removedServicesCount]
   );
 
   const overviewServiceMenus = useMemo(
@@ -523,6 +590,7 @@ const AdminDashboard = () => {
       } catch (e) {
         if (!apiSuccess) throw new Error("status-update-failed");
       }
+      await refreshAllAdminTables();
       showSuccess(`User ${accountStatus}.`);
     } catch (err) {
       showError(err?.response?.data?.message || "Unable to update account status.");
@@ -591,6 +659,7 @@ const AdminDashboard = () => {
       } catch (apiErr) {
         await deleteUserProfile(userId);
       }
+      await refreshAllAdminTables();
       showSuccess("User deleted.");
     } catch (err) {
       showError(
@@ -740,7 +809,7 @@ const AdminDashboard = () => {
         ...prev
       ]);
       setRemovedServicesCount((prev) => prev + 1);
-      await refreshServices();
+      await Promise.all([refreshServices(), refreshDashboardStats()]);
       showSuccess("Service removed.");
     } catch (err) {
       showError(err?.response?.data?.message || "Unable to remove service.");
@@ -884,46 +953,67 @@ const AdminDashboard = () => {
               </div>
 
               {isUsersLoading ? <p>Loading users...</p> : (
-                <div className="admin-table-wrap">
-                  <table className="admin-table admin-users-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Account Status</th><th>Approved</th><th>Created At</th><th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredUsers.length === 0 ? (
-                        <tr><td colSpan="8" className="admin-empty-row">No users found.</td></tr>
-                      ) : filteredUsers.map((user) => {
-                        const userId = user?._id || user?.id;
-                        const isProvider = normalizeText(user?.role) === "provider";
-                        const status = normalizeText(user?.accountStatus) || "active";
-                        const isApproved = user?.isApproved === true || normalizeText(user?.approvalStatus) === "approved";
-                        const isPendingProvider = isProvider && !isApproved;
-                        const isSuspended = status === "suspended";
-                        return (
-                          <tr key={userId}>
-                            <td>{user?.name || "N/A"}</td><td>{user?.email || "N/A"}</td><td>{user?.phone || "N/A"}</td><td>{user?.role || "N/A"}</td><td>{status}</td><td>{getBooleanLabel(user?.isApproved)}</td><td>{formatDate(user?.createdAt)}</td>
-                            <td>
-                              <div className="admin-inline-actions">
-                                <button type="button" className="admin-action-btn view-profile-btn" onClick={() => navigateToUserDetails(user)}>View profile</button>
-                                {isPendingProvider && (
-                                  <>
-                                    <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Accept</button>
-                                    <button type="button" className="admin-action-btn reject-btn" onClick={() => handleProviderApproval(userId, "reject")} disabled={getUserBusy(userId, "reject")}>Reject</button>
-                                  </>
-                                )}
-                                <button type="button" className="admin-action-btn suspend-btn" onClick={() => runUserStatusAction(userId, "suspended")} disabled={getUserBusy(userId, "status-suspended") || isSuspended}>Suspend</button>
-                                <button type="button" className="admin-action-btn activate-btn" onClick={() => runUserStatusAction(userId, "active")} disabled={getUserBusy(userId, "status-active") || !isSuspended}>Activate</button>
-                                <button type="button" className="admin-action-btn remove-btn" onClick={() => deleteUser(user)} disabled={getUserBusy(userId, "delete")}>Delete</button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table admin-users-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Account Status</th><th>Approved</th><th>Created At</th><th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedUsers.length === 0 ? (
+                          <tr><td colSpan="8" className="admin-empty-row">No users found.</td></tr>
+                        ) : paginatedUsers.map((user) => {
+                          const userId = user?._id || user?.id;
+                          const isProvider = normalizeText(user?.role) === "provider";
+                          const status = normalizeText(user?.accountStatus) || "active";
+                          const isApproved = user?.isApproved === true || normalizeText(user?.approvalStatus) === "approved";
+                          const isPendingProvider = isProvider && !isApproved;
+                          const isSuspended = status === "suspended";
+                          return (
+                            <tr key={userId}>
+                              <td>{user?.name || "N/A"}</td><td>{user?.email || "N/A"}</td><td>{user?.phone || "N/A"}</td><td>{user?.role || "N/A"}</td><td>{status}</td><td>{getBooleanLabel(user?.isApproved)}</td><td>{formatDate(user?.createdAt)}</td>
+                              <td>
+                                <div className="admin-inline-actions">
+                                  <button type="button" className="admin-action-btn view-profile-btn" onClick={() => navigateToUserDetails(user)}>View profile</button>
+                                  {isPendingProvider && (
+                                    <>
+                                      <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Accept</button>
+                                      <button type="button" className="admin-action-btn reject-btn" onClick={() => handleProviderApproval(userId, "reject")} disabled={getUserBusy(userId, "reject")}>Reject</button>
+                                    </>
+                                  )}
+                                  <button type="button" className="admin-action-btn suspend-btn" onClick={() => runUserStatusAction(userId, "suspended")} disabled={getUserBusy(userId, "status-suspended") || isSuspended}>Suspend</button>
+                                  <button type="button" className="admin-action-btn activate-btn" onClick={() => runUserStatusAction(userId, "active")} disabled={getUserBusy(userId, "status-active") || !isSuspended}>Activate</button>
+                                  <button type="button" className="admin-action-btn remove-btn" onClick={() => deleteUser(user)} disabled={getUserBusy(userId, "delete")}>Delete</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-pagination">
+                    <button
+                      type="button"
+                      className="admin-action-btn"
+                      onClick={() => setUsersPage((prev) => Math.max(1, prev - 1))}
+                      disabled={safeUsersPage <= 1}
+                    >
+                      Previous Page
+                    </button>
+                    <span>Page {safeUsersPage} of {usersTotalPages}</span>
+                    <button
+                      type="button"
+                      className="admin-action-btn"
+                      onClick={() => setUsersPage((prev) => Math.min(usersTotalPages, prev + 1))}
+                      disabled={safeUsersPage >= usersTotalPages}
+                    >
+                      Next Page
+                    </button>
+                  </div>
+                </>
               )}
             </article>
           </section>

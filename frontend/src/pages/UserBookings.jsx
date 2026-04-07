@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import {
   subscribeBookingsByUser,
-  updateBookingStatus,
+  cancelBooking as cancelBookingRequest,
+  deleteBooking as deleteBookingRequest,
   createReview,
   getReviewByBookingAndUser,
   getServiceById,
@@ -146,7 +147,7 @@ const UserBookings = () => {
     }
     try {
       setCancellingId(id);
-      await updateBookingStatus(id, "Cancelled");
+      await cancelBookingRequest(id);
       alert("Booking Cancelled");
     } catch (err) {
       alert(err?.message || "Failed to cancel booking");
@@ -202,9 +203,15 @@ const UserBookings = () => {
 
   const deleteBooking = async (bookingId) => {
     if (!window.confirm("Delete this booking from your history?")) return;
-    setDeletingId(bookingId);
-    alert("Delete is not supported with Firebase. You can cancel pending bookings instead.");
-    setDeletingId("");
+    try {
+      setDeletingId(bookingId);
+      await deleteBookingRequest(bookingId);
+      alert("Booking deleted successfully.");
+    } catch (err) {
+      alert(err?.message || "Failed to delete booking");
+    } finally {
+      setDeletingId("");
+    }
   };
 
   const getStatusColor = (status) => {

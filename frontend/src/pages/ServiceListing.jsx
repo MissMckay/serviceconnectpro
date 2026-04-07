@@ -31,6 +31,9 @@ const ServiceListing = () => {
     minPrice: "",
     maxPrice: ""
   });
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [activeQuickFilter, setActiveQuickFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(initialServices.length === 0);
   const [error, setError] = useState("");
 
@@ -248,83 +251,286 @@ const ServiceListing = () => {
     return matchesCategory && matchesMinPrice && matchesMaxPrice && matchesLocation;
   });
 
+  const quickFilteredServices = filteredServices.filter((service) => {
+    const createdAtTime =
+      service?.createdAt instanceof Date ? service.createdAt.getTime() : new Date(service?.createdAt || 0).getTime();
+    const isFresh = Number.isFinite(createdAtTime) && createdAtTime >= Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const isAvailable = String(service?.availabilityStatus || "").toLowerCase() === "available";
+
+    if (activeQuickFilter === "newest") return isFresh;
+    if (activeQuickFilter === "available") return isAvailable;
+    return true;
+  });
+
+  const sortedServices = [...quickFilteredServices].sort((a, b) => {
+    const aTime = a?.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a?.createdAt || 0).getTime();
+    const bTime = b?.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b?.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+
+  const availableServicesCount = filteredServices.filter(
+    (service) => String(service?.availabilityStatus || "").toLowerCase() === "available"
+  ).length;
+  const newestServicesCount = filteredServices.filter((service) => {
+    const createdAtTime =
+      service?.createdAt instanceof Date ? service.createdAt.getTime() : new Date(service?.createdAt || 0).getTime();
+    return Number.isFinite(createdAtTime) && createdAtTime >= Date.now() - (7 * 24 * 60 * 60 * 1000);
+  }).length;
+  const activeFilterChips = [
+    appliedFilters.selectedCategory && appliedFilters.selectedCategory !== "All"
+      ? `Category: ${appliedFilters.selectedCategory}`
+      : "",
+    appliedFilters.location ? `Location: ${appliedFilters.location}` : "",
+    appliedFilters.minPrice ? `Min: ${formatLrdPrice(appliedFilters.minPrice)}` : "",
+    appliedFilters.maxPrice ? `Max: ${formatLrdPrice(appliedFilters.maxPrice)}` : ""
+  ].filter(Boolean);
+  const hasActiveFilters = activeFilterChips.length > 0;
+
+  const resetFilters = () => {
+    const cleared = { selectedCategory: "All", location: "", minPrice: "", maxPrice: "" };
+    setSearchInputs(cleared);
+    setAppliedFilters(cleared);
+    setActiveQuickFilter("all");
+  };
+
+  const applyCategoryFilter = (category) => {
+    const nextFilters = {
+      ...searchInputs,
+      selectedCategory: category
+    };
+    setSearchInputs(nextFilters);
+    setAppliedFilters(nextFilters);
+    setIsSummaryOpen(false);
+    setIsSearchOpen(false);
+  };
+
   const handleSearch = (event) => {
     event.preventDefault();
-    setAppliedFilters(searchInputs);
+    const normalizedFilters = {
+      selectedCategory:
+        typeof searchInputs.selectedCategory === "string" && searchInputs.selectedCategory.trim()
+          ? searchInputs.selectedCategory.trim()
+          : "All",
+      location: String(searchInputs.location || "").trim(),
+      minPrice: String(searchInputs.minPrice || "").trim(),
+      maxPrice: String(searchInputs.maxPrice || "").trim()
+    };
+
+    const minPrice = Number(normalizedFilters.minPrice);
+    const maxPrice = Number(normalizedFilters.maxPrice);
+
+    if (
+      normalizedFilters.minPrice !== "" &&
+      normalizedFilters.maxPrice !== "" &&
+      Number.isFinite(minPrice) &&
+      Number.isFinite(maxPrice) &&
+      minPrice > maxPrice
+    ) {
+      normalizedFilters.minPrice = String(maxPrice);
+      normalizedFilters.maxPrice = String(minPrice);
+    }
+
+    setSearchInputs(normalizedFilters);
+    setAppliedFilters(normalizedFilters);
+    setIsSearchOpen(false);
   };
 
   return (
     <div className="page-shell services-page">
-      <header className="services-page__header">
-        <h1 className="services-page__title">Available Services provided in Liberia</h1>
-        <p className="services-page__subtitle">Find and book trusted local services. Filter by category, location, or price.</p>
-      </header>
-
-      <form className="services-search" onSubmit={handleSearch}>
-        <div className="services-search__field services-search__field--category">
-          <label htmlFor="services-category" className="services-search__label">Category</label>
-          <select
-            id="services-category"
-            className="services-search__input"
-            value={searchInputs.selectedCategory}
-            onChange={(e) =>
-              setSearchInputs((prev) => ({ ...prev, selectedCategory: e.target.value }))
-            }
-          >
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="services-search__field services-search__field--location">
-          <label htmlFor="services-location" className="services-search__label">Location</label>
-          <input
-            id="services-location"
-            list="service-location-options"
-            type="text"
-            className="services-search__input"
-            placeholder="City or area"
-            value={searchInputs.location}
-            onChange={(e) => setSearchInputs((prev) => ({ ...prev, location: e.target.value }))}
-          />
-          <datalist id="service-location-options">
-            {locationSuggestions.map((location) => (
-              <option key={location} value={location} />
-            ))}
-          </datalist>
-        </div>
-        <div className="services-search__field services-search__field--price">
-          <label htmlFor="services-min-price" className="services-search__label">Min price (LRD)</label>
-          <input
-            id="services-min-price"
-            type="number"
-            min="0"
-            className="services-search__input"
-            placeholder="0"
-            value={searchInputs.minPrice}
-            onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
-          />
-        </div>
-        <div className="services-search__field services-search__field--price">
-          <label htmlFor="services-max-price" className="services-search__label">Max price (LRD)</label>
-          <input
-            id="services-max-price"
-            type="number"
-            min="0"
-            className="services-search__input"
-            placeholder="Any"
-            value={searchInputs.maxPrice}
-            onChange={(e) => setSearchInputs((prev) => ({ ...prev, maxPrice: e.target.value }))}
-          />
-        </div>
-        <div className="services-search__action">
-          <button type="submit" className="services-search__btn">
-            Search
+      <button
+        type="button"
+        className={`services-summary-backdrop ${isSummaryOpen ? "is-open" : ""}`}
+        aria-hidden={!isSummaryOpen}
+        onClick={() => setIsSummaryOpen(false)}
+      />
+      <aside className={`services-summary-drawer ${isSummaryOpen ? "is-open" : ""}`} aria-label="Services summary">
+        <div className="services-summary-drawer__header">
+          <div>
+            <p className="services-summary-drawer__eyebrow">Summary</p>
+            <h2 className="services-summary-drawer__title">Service categories</h2>
+          </div>
+          <button type="button" className="services-summary-drawer__close" onClick={() => setIsSummaryOpen(false)}>
+            Close
           </button>
         </div>
-      </form>
+
+        <div className="services-summary-drawer__stats">
+          <div className="services-summary-drawer__stat">
+            <strong>{services.length}</strong>
+            <span>Total services</span>
+          </div>
+          <div className="services-summary-drawer__stat">
+            <strong>{availableServicesCount}</strong>
+            <span>Available</span>
+          </div>
+        </div>
+
+        <div className="services-summary-drawer__list" role="list">
+          <button
+            type="button"
+            className={`services-summary-drawer__item ${searchInputs.selectedCategory === "All" ? "is-active" : ""}`}
+            onClick={() => applyCategoryFilter("All")}
+          >
+            <span>All categories</span>
+          </button>
+          {categories.filter((category) => category !== "All").map((category) => (
+            <button
+              key={`summary-category-${category}`}
+              type="button"
+              className={`services-summary-drawer__item ${searchInputs.selectedCategory === category ? "is-active" : ""}`}
+              onClick={() => applyCategoryFilter(category)}
+            >
+              <span>{category}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <header className="services-page__header">
+        <div className="services-page__header-row">
+          <div>
+            <h1 className="services-page__title">Available Services provided in Liberia</h1>
+            <p className="services-page__subtitle">Find and book trusted local services. Filter by category, location, or price.</p>
+          </div>
+        </div>
+      </header>
+
+      <section className="services-toolbar" aria-label="Service tools">
+        <button
+          type="button"
+          className="services-toolbar__btn services-summary-trigger"
+          onClick={() => setIsSummaryOpen(true)}
+          aria-label="Open services summary"
+        >
+          <span />
+          <span />
+          <span />
+          <strong>Summary</strong>
+        </button>
+        <button
+          type="button"
+          className={`services-toolbar__btn ${isSearchOpen ? "is-active" : ""}`}
+          onClick={() => setIsSearchOpen((prev) => !prev)}
+        >
+          Search
+        </button>
+        <button
+          type="button"
+          className={`services-toolbar__btn ${activeQuickFilter === "newest" ? "is-active" : ""}`}
+          onClick={() => setActiveQuickFilter((prev) => (prev === "newest" ? "all" : "newest"))}
+        >
+          Newest
+        </button>
+        <button
+          type="button"
+          className={`services-toolbar__btn ${activeQuickFilter === "available" ? "is-active" : ""}`}
+          onClick={() => setActiveQuickFilter((prev) => (prev === "available" ? "all" : "available"))}
+        >
+          Available
+        </button>
+      </section>
+
+      {isSearchOpen && (
+        <section className="services-search-panel">
+          <div className="services-search-panel__top">
+            <div>
+              <h2 className="services-search-panel__title">Search services</h2>
+              <p className="services-search-panel__subtitle">Use the filters below to narrow the listing.</p>
+            </div>
+            {hasActiveFilters && (
+              <button type="button" className="services-search-panel__reset" onClick={resetFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          <form className="services-search" onSubmit={handleSearch}>
+            <div className="services-search__field services-search__field--category">
+              <label htmlFor="services-category" className="services-search__label">Category</label>
+              <select
+                id="services-category"
+                className="services-search__input"
+                value={searchInputs.selectedCategory}
+                onChange={(e) =>
+                  setSearchInputs((prev) => ({ ...prev, selectedCategory: e.target.value }))
+                }
+              >
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="services-search__field services-search__field--location">
+              <label htmlFor="services-location" className="services-search__label">Location</label>
+              <input
+                id="services-location"
+                list="service-location-options"
+                type="text"
+                className="services-search__input"
+                placeholder="City, area, or address"
+                value={searchInputs.location}
+                onChange={(e) => setSearchInputs((prev) => ({ ...prev, location: e.target.value }))}
+              />
+              <datalist id="service-location-options">
+                {locationSuggestions.map((location) => (
+                  <option key={location} value={location} />
+                ))}
+              </datalist>
+            </div>
+            <div className="services-search__field services-search__field--price">
+              <label htmlFor="services-min-price" className="services-search__label">Min price (LRD)</label>
+              <input
+                id="services-min-price"
+                type="number"
+                min="0"
+                className="services-search__input"
+                placeholder="0"
+                value={searchInputs.minPrice}
+                onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
+              />
+            </div>
+            <div className="services-search__field services-search__field--price">
+              <label htmlFor="services-max-price" className="services-search__label">Max price (LRD)</label>
+              <input
+                id="services-max-price"
+                type="number"
+                min="0"
+                className="services-search__input"
+                placeholder="Any"
+                value={searchInputs.maxPrice}
+                onChange={(e) => setSearchInputs((prev) => ({ ...prev, maxPrice: e.target.value }))}
+              />
+            </div>
+            <div className="services-search__action">
+              <button type="submit" className="services-search__btn">
+                Search Services
+              </button>
+            </div>
+          </form>
+
+          {hasActiveFilters && (
+            <div className="services-active-filters" aria-label="Active filters">
+              {activeFilterChips.map((chip) => (
+                <span key={chip} className="services-active-filters__chip">{chip}</span>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="services-results-bar" aria-label="Results summary">
+        <div>
+          <p className="services-results-bar__eyebrow">Search results</p>
+          <h2 className="services-results-bar__title">{sortedServices.length} services found</h2>
+        </div>
+        <div className="services-results-bar__meta">
+          <span>{availableServicesCount} available now</span>
+          <span>{newestServicesCount} newest</span>
+          <span>Newest first</span>
+        </div>
+      </section>
 
       {!isLoading && error && (
         <div className="service-listing-error">
@@ -339,9 +545,9 @@ const ServiceListing = () => {
         </div>
       )}
 
-      {!isLoading && !error && filteredServices.length > 0 && (
+      {!isLoading && !error && sortedServices.length > 0 && (
         <div className="service-listing-grid">
-          {filteredServices.map((service) => {
+          {sortedServices.map((service) => {
             const { average: embeddedAvg, count: embeddedCount } = getAverageRatingAndCount(service);
             const displayRating = Number.isFinite(Number(service?.averageRating))
               ? Number(service.averageRating)
@@ -361,13 +567,21 @@ const ServiceListing = () => {
             const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
             const providerPhoto = getLiveProviderPhoto(service, providerProfiles);
             const firstImageUrl = getFirstServiceImageUrl(service);
+            const createdAtTime =
+              service?.createdAt instanceof Date ? service.createdAt.getTime() : new Date(service?.createdAt || 0).getTime();
+            const isFresh = Number.isFinite(createdAtTime) && createdAtTime >= Date.now() - (7 * 24 * 60 * 60 * 1000);
 
             return (
               <article
                 key={service._id}
                 className="sc-card"
               >
-                <div className="sc-card__image-wrap">
+                <button
+                  type="button"
+                  className="sc-card__image-wrap"
+                  onClick={() => handleReviewClick(service._id, service)}
+                  aria-label={`Open details for ${service.serviceName || "this service"}`}
+                >
                   {firstImageUrl ? (
                     <img
                       src={firstImageUrl}
@@ -390,10 +604,17 @@ const ServiceListing = () => {
                       }}
                     />
                   ) : null}
+                  <div className="sc-card__image-overlay" />
+                  <div className="sc-card__image-badges">
+                    {isFresh && <span className="sc-card__image-badge sc-card__image-badge--fresh">New</span>}
+                    <span className={`sc-card__image-badge ${isAvailable ? "sc-card__image-badge--available" : "sc-card__image-badge--unavailable"}`}>
+                      {isAvailable ? "Available" : "Unavailable"}
+                    </span>
+                  </div>
                   <div className="sc-card__image-placeholder" style={{ display: firstImageUrl ? "none" : "flex" }}>
                     No photo
                   </div>
-                </div>
+                </button>
 
                 <div className="sc-card__content">
                   <div className="sc-card__tags-row">
@@ -401,8 +622,8 @@ const ServiceListing = () => {
                       <span className="sc-card__tag sc-card__tag--category">
                         {service?.category || "General"}
                       </span>
-                      <span className={`sc-card__tag sc-card__tag--status ${isAvailable ? "sc-card__tag--available" : "sc-card__tag--unavailable"}`}>
-                        {service?.availabilityStatus || "—"}
+                      <span className="sc-card__tag sc-card__tag--location" title={locationDisplay || "Location not provided"}>
+                        {locationDisplay || "Location pending"}
                       </span>
                     </div>
                     <span className="sc-card__provider-badge" title={providerName}>
@@ -421,12 +642,11 @@ const ServiceListing = () => {
                   )}
 
                   <div className="sc-card__provider">
+                    <span className="sc-card__provider-label">Provided by</span>
                     <span className="sc-card__provider-name">{providerName}</span>
-                    {locationDisplay && (
-                      <span className="sc-card__provider-location" title={locationDisplay}>
-                        {locationDisplay.length > 30 ? `${locationDisplay.slice(0, 30)}…` : locationDisplay}
-                      </span>
-                    )}
+                    <span className="sc-card__provider-location" title={locationDisplay || "Location not provided"}>
+                      {locationDisplay || "Location not provided"}
+                    </span>
                   </div>
 
                   <div className="sc-card__bottom">
@@ -524,7 +744,7 @@ const ServiceListing = () => {
         </div>
       )}
 
-      {!isLoading && !error && filteredServices.length === 0 && (
+      {!isLoading && !error && sortedServices.length === 0 && (
         <div className="services-empty">
           <div className="services-empty__icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5">

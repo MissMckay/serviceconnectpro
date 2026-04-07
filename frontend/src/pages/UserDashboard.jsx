@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { getPublicServicesSnapshot, getServices, getUserProfile, updateUserProfile } from "../firebase/firestoreServices";
+import { getPublicServicesSnapshot, getServices, getUserProfile, subscribeBookingsByUser, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
@@ -38,6 +38,7 @@ const UserDashboard = () => {
   const [profileData, setProfileData] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [bookings, setBookings] = useState([]);
 
   const { user, refreshProfile } = useContext(AuthContext);
 
@@ -222,6 +223,21 @@ const UserDashboard = () => {
   }, [filters.category, filters.location]);
 
   useEffect(() => {
+    if (!user?.uid) {
+      setBookings([]);
+      return undefined;
+    }
+
+    const unsub = subscribeBookingsByUser(user.uid, (bookingList) => {
+      setBookings(Array.isArray(bookingList) ? bookingList : []);
+    });
+
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
     if (activeView !== "profile") return;
 
     setProfileData(user || {});
@@ -310,6 +326,23 @@ const UserDashboard = () => {
       });
   }, [profileData, user]);
 
+  const dashboardStats = useMemo(() => {
+    const byStatus = { Pending: 0, Accepted: 0, Rejected: 0, Cancelled: 0, Completed: 0 };
+    bookings.forEach((booking) => {
+      const status = String(booking?.status || "").trim() || "Pending";
+      if (Object.prototype.hasOwnProperty.call(byStatus, status)) {
+        byStatus[status] += 1;
+      }
+    });
+
+    return {
+      availableServices: filteredServices.length,
+      totalBookings: bookings.length,
+      pendingBookings: byStatus.Pending,
+      completedBookings: byStatus.Completed
+    };
+  }, [bookings, filteredServices.length]);
+
   return (
     <div className="user-dashboard-content">
       <main className="dashboard-main-content">
@@ -317,6 +350,25 @@ const UserDashboard = () => {
           <>
             {!selectedService && (
               <>
+                <div className="admin-report-strip" style={{ marginBottom: "1.25rem" }}>
+                  <div className="admin-metric">
+                    <p>Available Services</p>
+                    <strong>{dashboardStats.availableServices}</strong>
+                  </div>
+                  <div className="admin-metric">
+                    <p>My Bookings</p>
+                    <strong>{dashboardStats.totalBookings}</strong>
+                  </div>
+                  <div className="admin-metric">
+                    <p>Pending</p>
+                    <strong>{dashboardStats.pendingBookings}</strong>
+                  </div>
+                  <div className="admin-metric">
+                    <p>Completed</p>
+                    <strong>{dashboardStats.completedBookings}</strong>
+                  </div>
+                </div>
+
                 <form className="dashboard-search" onSubmit={handleSearch}>
                   <select
                     value={categoryInput}
