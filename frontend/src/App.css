@@ -4784,6 +4784,45 @@
   }
 }
 
+@media (max-width: 430px) {
+  .services-search {
+    gap: 5px;
+    padding: 10px 8px;
+  }
+
+  .services-search__field--category {
+    min-width: 64px;
+    flex-basis: 64px;
+  }
+
+  .services-search__field--location {
+    min-width: 74px;
+    flex-basis: 74px;
+  }
+
+  .services-search__field--price {
+    min-width: 48px;
+    flex-basis: 48px;
+  }
+
+  .services-search__label {
+    font-size: 0.58rem;
+    letter-spacing: 0.02em;
+  }
+
+  .services-search__input {
+    height: 32px;
+    padding: 0 4px;
+    font-size: 0.68rem;
+  }
+
+  .services-search__btn {
+    height: 32px;
+    padding: 0 6px;
+    font-size: 0.66rem;
+  }
+}
+
 /* =========================================
    SC-CARD – Service listing card (regenerated)
 ========================================= */

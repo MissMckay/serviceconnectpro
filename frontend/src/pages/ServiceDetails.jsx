@@ -394,7 +394,7 @@ const ServiceDetails = () => {
                 onClick={() => navigate(`/book/${id}`)}
                 disabled={!isAvailable}
               >
-                Book Now
+                Book
               </button>
               <button
                 type="button"

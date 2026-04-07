@@ -444,7 +444,7 @@ const UserDashboard = () => {
                                   onClick={() => navigate(`/book/${service._id}`)}
                                   disabled={!isAvailable}
                                 >
-                                  Book Now
+                                  Book
                                 </button>
                                 {getWhatsAppUrl(providerPhone) && (
                                   <a
@@ -567,7 +567,7 @@ const UserDashboard = () => {
                       className="service-card-btn"
                       onClick={() => navigate(`/book/${selectedService._id}`)}
                     >
-                      Book Now
+                      Book
                     </button>
                     <button
                       type="button"
