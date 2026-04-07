@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Service = require("../models/Service");
 const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
+const connectDB = require("../config/db");
 
 const parseMaybeJson = (value) => {
   if (typeof value !== "string") return value;
@@ -211,6 +212,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
       "getAllServices skipped: MongoDB is not connected.",
       { readyState: mongoose.connection.readyState }
     );
+    connectDB.scheduleReconnect("getAllServices-not-connected");
     return res.json(getFallbackServicesPayload(page, limit, cached?.payload));
   }
 
@@ -266,6 +268,9 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     res.json(payload);
   } catch (err) {
     console.error("getAllServices error:", err);
+    if (connectDB.isMongoConnectionError(err)) {
+      connectDB.scheduleReconnect("getAllServices-query-failed");
+    }
     // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
     const lastCached = listCache.get(cacheKey);
     res.status(200).json(getFallbackServicesPayload(page, limit, lastCached?.payload));
