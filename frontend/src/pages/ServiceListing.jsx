@@ -261,7 +261,7 @@ const ServiceListing = () => {
       </header>
 
       <form className="services-search" onSubmit={handleSearch}>
-        <div className="services-search__field">
+        <div className="services-search__field services-search__field--category">
           <label htmlFor="services-category" className="services-search__label">Category</label>
           <select
             id="services-category"
@@ -278,7 +278,7 @@ const ServiceListing = () => {
             ))}
           </select>
         </div>
-        <div className="services-search__field">
+        <div className="services-search__field services-search__field--location">
           <label htmlFor="services-location" className="services-search__label">Location</label>
           <input
             id="services-location"
@@ -295,7 +295,7 @@ const ServiceListing = () => {
             ))}
           </datalist>
         </div>
-        <div className="services-search__field">
+        <div className="services-search__field services-search__field--price">
           <label htmlFor="services-min-price" className="services-search__label">Min price (LRD)</label>
           <input
             id="services-min-price"
@@ -307,7 +307,7 @@ const ServiceListing = () => {
             onChange={(e) => setSearchInputs((prev) => ({ ...prev, minPrice: e.target.value }))}
           />
         </div>
-        <div className="services-search__field">
+        <div className="services-search__field services-search__field--price">
           <label htmlFor="services-max-price" className="services-search__label">Max price (LRD)</label>
           <input
             id="services-max-price"
@@ -321,7 +321,7 @@ const ServiceListing = () => {
         </div>
         <div className="services-search__action">
           <button type="submit" className="services-search__btn">
-            Apply filters
+            Search
           </button>
         </div>
       </form>
@@ -449,7 +449,7 @@ const ServiceListing = () => {
                         className="sc-card__btn sc-card__btn--secondary"
                         onClick={() => handleReviewClick(service._id, service)}
                       >
-                        View details
+                        Details
                       </button>
                       {(role === "user" || !role) && (
                         <button
