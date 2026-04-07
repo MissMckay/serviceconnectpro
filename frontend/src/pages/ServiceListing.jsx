@@ -678,7 +678,7 @@ const ServiceListing = () => {
                           onClick={() => handleBookingClick(service._id)}
                           disabled={!isAvailable}
                         >
-                          Book
+                          Book Now
                         </button>
                       )}
                       {getWhatsAppUrl(providerPhone) && (
