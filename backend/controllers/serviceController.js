@@ -4,6 +4,11 @@ const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const connectDB = require("../config/db");
 
+const getIntEnv = (name, fallback) => {
+  const parsed = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const parseMaybeJson = (value) => {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
@@ -31,6 +36,9 @@ const IMAGE_FIELD_NAMES = [
   "photoUrls",
   "serviceImages"
 ];
+const MAX_SERVICE_IMAGES = 7;
+const MAX_SERVICE_IMAGE_BYTES = 550 * 1024;
+const MAX_THUMBNAIL_BYTES = 180 * 1024;
 
 const isImageObject = (value) =>
   Boolean(
@@ -89,13 +97,14 @@ const normalizeServiceImages = (imagesInput) => {
       const normalizedItem = parsedItem && typeof parsedItem === "object" ? parsedItem : item;
 
       if (typeof normalizedItem === "string") {
-        return { imageUrl: normalizedItem.trim(), caption: "" };
+        return { imageUrl: normalizedItem.trim(), thumbnailUrl: "", caption: "" };
       }
 
       if (normalizedItem && typeof normalizedItem === "object") {
         const imageUrl = (normalizedItem.imageUrl || normalizedItem.url || "").toString().trim();
+        const thumbnailUrl = (normalizedItem.thumbnailUrl || normalizedItem.thumbUrl || "").toString().trim();
         const caption = typeof normalizedItem.caption === "string" ? normalizedItem.caption : "";
-        return imageUrl ? { imageUrl, caption } : null;
+        return imageUrl ? { imageUrl, thumbnailUrl, caption } : null;
       }
 
       return null;
@@ -104,19 +113,42 @@ const normalizeServiceImages = (imagesInput) => {
     .filter(Boolean);
 };
 
-exports.createService = asyncHandler(async (req, res) => {
-  const { serviceName, category, description, price, availabilityStatus, providerName, providerAddress, providerProfilePhoto } = req.body;
-  const providerQuery = User.findById(String(req.user.id))
-    .read("secondaryPreferred")
-    .select("role isApproved accountStatus name providerAddress profilePhoto");
-  const provider = typeof providerQuery.lean === "function" ? await providerQuery.lean() : await providerQuery;
+const getStringByteLength = (value) => Buffer.byteLength(String(value || ""), "utf8");
 
-  if (
-    !provider ||
-    provider.role !== "provider" ||
-    provider.isApproved !== true ||
-    provider.accountStatus !== "active"
-  ) {
+const sanitizeThumbnailUrl = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:") && getStringByteLength(trimmed) > MAX_THUMBNAIL_BYTES) {
+    return "";
+  }
+  return trimmed;
+};
+
+const validateNormalizedImages = (images = []) => {
+  images.forEach((image, index) => {
+    const imageUrl = typeof image?.imageUrl === "string" ? image.imageUrl.trim() : "";
+    const thumbnailUrl = typeof image?.thumbnailUrl === "string" ? image.thumbnailUrl.trim() : "";
+
+    if (!imageUrl) return;
+
+    if (imageUrl.startsWith("data:") && getStringByteLength(imageUrl) > MAX_SERVICE_IMAGE_BYTES) {
+      const error = new Error(`Service image ${index + 1} is too large. Please upload a smaller image.`);
+      error.statusCode = 413;
+      throw error;
+    }
+
+    if (thumbnailUrl.startsWith("data:") && getStringByteLength(thumbnailUrl) > MAX_THUMBNAIL_BYTES) {
+      const error = new Error(`Service thumbnail ${index + 1} is too large. Please upload a smaller image.`);
+      error.statusCode = 413;
+      throw error;
+    }
+  });
+};
+
+exports.createService = asyncHandler(async (req, res) => {
+  const { serviceName, category, description, price, availabilityStatus, providerName, providerAddress } = req.body;
+  if (String(req.user?.role || "").toLowerCase() !== "provider") {
     const error = new Error("Only providers can create services");
     error.statusCode = 403;
     throw error;
@@ -140,29 +172,42 @@ exports.createService = asyncHandler(async (req, res) => {
     error.statusCode = 400;
     throw error;
   }
-  if (normalizedImages.length > 10) {
-    const error = new Error("Maximum 10 images are allowed");
+  if (normalizedImages.length > MAX_SERVICE_IMAGES) {
+    const error = new Error(`Maximum ${MAX_SERVICE_IMAGES} images are allowed`);
     error.statusCode = 400;
     throw error;
   }
+  validateNormalizedImages(normalizedImages);
 
-  const service = await Service.create({
+  const servicePayload = {
     serviceName,
     category,
     description,
     price: Number(price),
-    availabilityStatus: ["Available", "Unavailable"].includes(availabilityStatus)
+      availabilityStatus: ["Available", "Unavailable"].includes(availabilityStatus)
       ? availabilityStatus
       : "Available",
     images: normalizedImages,
-    thumbnailUrl: Array.isArray(normalizedImages) && normalizedImages[0]?.imageUrl
-      ? normalizedImages[0].imageUrl
+    thumbnailUrl: Array.isArray(normalizedImages)
+      ? sanitizeThumbnailUrl(normalizedImages[0]?.thumbnailUrl) || ""
       : "",
     providerId: String(req.user.id),
-    providerName: (typeof providerName === "string" && providerName.trim()) ? providerName.trim() : (provider.name || ""),
-    providerAddress: (typeof providerAddress === "string" && providerAddress.trim()) ? providerAddress.trim() : (provider.providerAddress || ""),
-    providerProfilePhoto: (typeof providerProfilePhoto === "string" && providerProfilePhoto.trim()) ? providerProfilePhoto.trim() : (provider.profilePhoto || ""),
-  });
+    providerName: typeof providerName === "string" ? providerName.trim() : "",
+    providerAddress: typeof providerAddress === "string" ? providerAddress.trim() : "",
+  };
+
+  let service;
+  try {
+    service = await Service.create(servicePayload);
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+    await connectDB.forceReconnect("createService-save");
+    service = await Service.create(servicePayload);
+  }
+
+  clearServicesListCache();
 
   res.status(201).json({
     success: true,
@@ -172,7 +217,13 @@ exports.createService = asyncHandler(async (req, res) => {
 
 // In-memory cache for services list to make repeat loads / retries instant (TTL 5s)
 const listCache = new Map();
-const LIST_CACHE_TTL_MS = 5000;
+const listRefreshPromises = new Map();
+const serviceDetailCache = new Map();
+const serviceDetailRefreshPromises = new Map();
+const LIST_CACHE_TTL_MS = getIntEnv("SERVICES_LIST_CACHE_TTL_MS", 5000);
+const LIST_CACHE_STALE_TTL_MS = getIntEnv("SERVICES_LIST_CACHE_STALE_TTL_MS", 60000);
+const SERVICES_QUERY_TIMEOUT_MS = getIntEnv("SERVICES_QUERY_TIMEOUT_MS", 3000);
+const SERVICES_REFRESH_TIMEOUT_MS = getIntEnv("SERVICES_REFRESH_TIMEOUT_MS", 900);
 const MONGO_CONNECTED_STATE = 1;
 
 const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "", providerId = "") =>
@@ -184,11 +235,13 @@ const buildServicesMeta = ({
   message = null,
   readyState = mongoose.connection.readyState,
   cache = "none",
+  debug = null,
 } = {}) => ({
   degraded,
   reason,
   message,
   cache,
+  ...(debug ? { debug } : {}),
   database: {
     readyState,
     connected: readyState === MONGO_CONNECTED_STATE,
@@ -199,6 +252,80 @@ const attachMeta = (payload, meta) => ({
   ...payload,
   meta,
 });
+
+const clearServicesListCache = () => {
+  listCache.clear();
+  listRefreshPromises.clear();
+  serviceDetailCache.clear();
+  serviceDetailRefreshPromises.clear();
+};
+
+const getCacheEntry = (cacheKey) => {
+  const cached = listCache.get(cacheKey);
+  if (!cached) return null;
+
+  if (cached.staleUntil <= Date.now()) {
+    listCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached;
+};
+
+const setCacheEntry = (cacheKey, payload) => {
+  listCache.set(cacheKey, {
+    payload,
+    expiresAt: Date.now() + LIST_CACHE_TTL_MS,
+    staleUntil: Date.now() + LIST_CACHE_STALE_TTL_MS,
+  });
+
+  if (listCache.size > 50) {
+    const firstKey = listCache.keys().next().value;
+    if (firstKey !== undefined) listCache.delete(firstKey);
+  }
+};
+
+const getServiceDetailCacheKey = (serviceId) => `detail:${String(serviceId || "")}`;
+
+const getServiceDetailCacheEntry = (serviceId) => {
+  const cached = serviceDetailCache.get(getServiceDetailCacheKey(serviceId));
+  if (!cached) return null;
+
+  if (cached.staleUntil <= Date.now()) {
+    serviceDetailCache.delete(getServiceDetailCacheKey(serviceId));
+    return null;
+  }
+
+  return cached;
+};
+
+const setServiceDetailCacheEntry = (serviceId, payload) => {
+  serviceDetailCache.set(getServiceDetailCacheKey(serviceId), {
+    payload,
+    expiresAt: Date.now() + LIST_CACHE_TTL_MS,
+    staleUntil: Date.now() + LIST_CACHE_STALE_TTL_MS,
+  });
+};
+
+const withTimeout = (promise, timeoutMs, message) =>
+  new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.code = "SERVICES_QUERY_TIMEOUT";
+      reject(error);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
 
 const getFallbackServicesPayload = (page, limit, cachedPayload, meta) => {
   if (cachedPayload) {
@@ -220,7 +347,7 @@ const getFallbackServicesPayload = (page, limit, cachedPayload, meta) => {
 };
 
 const applyServiceUpdates = (service, body = {}) => {
-  const allowedFields = ["serviceName", "category", "description", "price", "availabilityStatus"];
+  const allowedFields = ["serviceName", "category", "description", "price", "availabilityStatus", "providerName", "providerAddress"];
 
   allowedFields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(body, field)) {
@@ -234,9 +361,108 @@ const applyServiceUpdates = (service, body = {}) => {
 
   if (IMAGE_FIELD_NAMES.some((fieldName) => Object.prototype.hasOwnProperty.call(body, fieldName))) {
     const normalizedImages = normalizeServiceImages(getImagesFromBody(body)) || [];
+    validateNormalizedImages(normalizedImages);
     service.images = normalizedImages;
+    service.thumbnailUrl = Array.isArray(normalizedImages)
+      ? sanitizeThumbnailUrl(normalizedImages[0]?.thumbnailUrl) || ""
+      : "";
   }
 };
+
+const fetchServicesPage = async ({
+  page,
+  limit,
+  skip,
+  category,
+  minPrice,
+  maxPrice,
+  location,
+  providerId,
+  timeoutMs = SERVICES_QUERY_TIMEOUT_MS,
+}) => {
+  const filter = { moderationStatus: { $ne: "removed" } };
+  if (category && category !== "All") filter.category = category;
+  if (Number.isFinite(minPrice) && minPrice >= 0) filter.price = { ...(filter.price || {}), $gte: minPrice };
+  if (Number.isFinite(maxPrice) && maxPrice >= 0) filter.price = { ...(filter.price || {}), $lte: maxPrice };
+  if (location) filter.providerAddress = { $regex: location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+  if (providerId) filter.providerId = providerId;
+
+  const fetchLimit = limit + 1;
+  const rawServices = await withTimeout(
+    Service.find(filter)
+      .select("serviceName category description price availabilityStatus providerId providerName providerAddress averageRating reviewsCount createdAt thumbnailUrl")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(fetchLimit)
+      .maxTimeMS(Math.max(250, timeoutMs))
+      .lean(),
+    timeoutMs,
+    `Services query exceeded ${timeoutMs}ms`
+  );
+
+  const hasMore = rawServices.length > limit;
+  const list = rawServices.slice(0, limit);
+
+  const services = list;
+
+  const totalPages = hasMore ? page + 1 : page;
+  const total = (page - 1) * limit + services.length + (hasMore ? 1 : 0);
+
+  return {
+    success: true,
+    data: services,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, totalPages),
+      hasNextPage: hasMore
+    }
+  };
+};
+
+const refreshServicesCache = async (cacheKey, params, cachedPayload) => {
+  if (listRefreshPromises.has(cacheKey)) {
+    return listRefreshPromises.get(cacheKey);
+  }
+
+  const refreshPromise = fetchServicesPage({
+    ...params,
+    timeoutMs: SERVICES_REFRESH_TIMEOUT_MS,
+  })
+    .then((payload) => {
+      setCacheEntry(cacheKey, payload);
+      return payload;
+    })
+    .catch((error) => {
+      if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+        connectDB.scheduleReconnect("getAllServices-refresh-failed");
+      }
+
+      if (cachedPayload) {
+        return cachedPayload;
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      listRefreshPromises.delete(cacheKey);
+    });
+
+  listRefreshPromises.set(cacheKey, refreshPromise);
+  return refreshPromise;
+};
+
+const fetchServiceDetail = async (id, timeoutMs = 4000) =>
+  withTimeout(
+    Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } })
+      .select("serviceName category description price availabilityStatus providerId providerName providerAddress averageRating reviewsCount createdAt thumbnailUrl images")
+      .slice("images", MAX_SERVICE_IMAGES)
+      .maxTimeMS(timeoutMs)
+      .lean(),
+    timeoutMs,
+    `Service detail query exceeded ${timeoutMs}ms`
+  );
 
 exports.getAllServices = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -249,7 +475,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
   const providerId = typeof req.query.providerId === "string" ? req.query.providerId.trim() : "";
   const cacheKey = getCacheKey(page, limit, category, minPrice, maxPrice, location, providerId);
 
-  const cached = listCache.get(cacheKey);
+  const cached = getCacheEntry(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
     return res.json(
       attachMeta(
@@ -304,66 +530,48 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     );
   }
 
-  try {
-    const filter = { moderationStatus: { $ne: "removed" } };
-    if (category && category !== "All") filter.category = category;
-    if (Number.isFinite(minPrice) && minPrice >= 0) filter.price = { ...(filter.price || {}), $gte: minPrice };
-    if (Number.isFinite(maxPrice) && maxPrice >= 0) filter.price = { ...(filter.price || {}), $lte: maxPrice };
-    if (location) filter.providerAddress = { $regex: location.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
-    if (providerId) filter.providerId = providerId;
-
-    const fetchLimit = limit + 1;
-    const rawServices = await Service.find(filter)
-      .select("serviceName category description price availabilityStatus images thumbnailUrl providerId providerName providerAddress providerProfilePhoto averageRating reviewsCount createdAt")
-      .read("secondaryPreferred")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(fetchLimit)
-      .maxTimeMS(2500)
-      .lean();
-
-    const hasMore = rawServices.length > limit;
-    const list = rawServices.slice(0, limit);
-
-    // Trim to first image per service for list to keep payload small
-    const services = list.map((s) =>
-      s && Array.isArray(s.images) && s.images.length > 1
-        ? { ...s, images: [s.images[0]] }
-        : s
+  if (cached?.payload) {
+    void refreshServicesCache(
+      cacheKey,
+      { page, limit, skip, category, minPrice, maxPrice, location, providerId },
+      cached.payload
     );
 
-    const totalPages = hasMore ? page + 1 : page;
-    const total = (page - 1) * limit + services.length + (hasMore ? 1 : 0);
+    return res.json(
+      attachMeta(
+        cached.payload,
+        buildServicesMeta({ cache: "stale" })
+      )
+    );
+  }
 
-    const payload = {
-      success: true,
-      data: services,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.max(1, totalPages),
-        hasNextPage: hasMore
-      },
-      meta: buildServicesMeta({
-        cache: cached?.payload ? "refresh" : "none",
-      }),
-    };
+  try {
+    const payload = await fetchServicesPage({
+      page,
+      limit,
+      skip,
+      category,
+      minPrice,
+      maxPrice,
+      location,
+      providerId,
+    });
 
-    listCache.set(cacheKey, { payload, expiresAt: Date.now() + LIST_CACHE_TTL_MS });
-    // Keep cache size bounded
-    if (listCache.size > 50) {
-      const firstKey = listCache.keys().next().value;
-      if (firstKey !== undefined) listCache.delete(firstKey);
-    }
+    setCacheEntry(cacheKey, payload);
 
-    res.json(payload);
+    res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=60");
+    res.json(
+      attachMeta(
+        payload,
+        buildServicesMeta({ cache: "refresh" })
+      )
+    );
   } catch (err) {
-    if (connectDB.isMongoConnectionError(err)) {
+    if (connectDB.isMongoConnectionError(err) || err?.code === "SERVICES_QUERY_TIMEOUT") {
       connectDB.scheduleReconnect("getAllServices-query-failed");
     }
     // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
-    const lastCached = listCache.get(cacheKey);
+    const lastCached = getCacheEntry(cacheKey) || cached;
     res.status(200).json(
       getFallbackServicesPayload(
         page,
@@ -374,6 +582,11 @@ exports.getAllServices = asyncHandler(async (req, res) => {
           reason: "database_query_failed",
           message: "Services could not be refreshed because the database is temporarily unavailable.",
           cache: lastCached?.payload ? "stale" : "none",
+          debug: {
+            name: err?.name || "Error",
+            code: err?.code || null,
+            message: err?.message || "Unknown services query failure",
+          },
         })
       )
     );
@@ -387,19 +600,78 @@ exports.getServiceById = asyncHandler(async (req, res) => {
     error.statusCode = 400;
     throw error;
   }
-  const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } })
-    .read("secondaryPreferred")
-    .maxTimeMS(4000)
-    .lean();
-  if (!service) {
-    const error = new Error("Service not found");
-    error.statusCode = 404;
+  const cacheKey = getServiceDetailCacheKey(id);
+  const cached = getServiceDetailCacheEntry(id);
+
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({
+      success: true,
+      data: cached.payload,
+      meta: buildServicesMeta({ cache: "fresh" }),
+    });
+  }
+
+  if (cached?.payload) {
+    if (!serviceDetailRefreshPromises.has(cacheKey)) {
+      const refreshPromise = fetchServiceDetail(id, 1200)
+        .then((service) => {
+          if (service) setServiceDetailCacheEntry(id, service);
+          return service;
+        })
+        .catch((error) => {
+          if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+            connectDB.scheduleReconnect("getServiceById-refresh-failed");
+          }
+          return cached.payload;
+        })
+        .finally(() => {
+          serviceDetailRefreshPromises.delete(cacheKey);
+        });
+
+      serviceDetailRefreshPromises.set(cacheKey, refreshPromise);
+    }
+
+    return res.json({
+      success: true,
+      data: cached.payload,
+      meta: buildServicesMeta({ cache: "stale" }),
+    });
+  }
+
+  try {
+    const service = await fetchServiceDetail(id, 4000);
+    if (!service) {
+      const error = new Error("Service not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    setServiceDetailCacheEntry(id, service);
+    res.json({
+      success: true,
+      data: service,
+      meta: buildServicesMeta({ cache: "refresh" }),
+    });
+  } catch (error) {
+    if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+      connectDB.scheduleReconnect("getServiceById-query-failed");
+      return res.status(200).json({
+        success: true,
+        data: cached?.payload || null,
+        meta: buildServicesMeta({
+          degraded: true,
+          reason: "database_query_failed",
+          message: "Service details could not be refreshed right now.",
+          cache: cached?.payload ? "stale" : "none",
+          debug: {
+            name: error?.name || "Error",
+            code: error?.code || null,
+            message: error?.message || "Unknown service detail failure",
+          },
+        }),
+      });
+    }
     throw error;
   }
-  res.json({
-    success: true,
-    data: service
-  });
 });
 
 exports.updateService = asyncHandler(async (req, res) => {
@@ -428,8 +700,8 @@ exports.updateService = asyncHandler(async (req, res) => {
       error.statusCode = 400;
       throw error;
     }
-    if (normalizedImages.length > 10) {
-      const error = new Error("Maximum 10 images are allowed");
+    if (normalizedImages.length > MAX_SERVICE_IMAGES) {
+      const error = new Error(`Maximum ${MAX_SERVICE_IMAGES} images are allowed`);
       error.statusCode = 400;
       throw error;
     }
@@ -445,6 +717,7 @@ exports.updateService = asyncHandler(async (req, res) => {
 
   try {
     await service.save();
+    clearServicesListCache();
   } catch (error) {
     if (!connectDB.isMongoConnectionError(error)) {
       throw error;
@@ -474,6 +747,7 @@ exports.updateService = asyncHandler(async (req, res) => {
     }
 
     await retryService.save();
+    clearServicesListCache();
     return res.json({
       success: true,
       data: retryService
@@ -506,6 +780,7 @@ exports.deleteService = asyncHandler(async (req, res) => {
   }
 
   await service.deleteOne();
+  clearServicesListCache();
 
   res.json({
     success: true,

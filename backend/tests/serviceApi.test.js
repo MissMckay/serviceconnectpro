@@ -2,11 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const jwt = require("jsonwebtoken");
 const express = require("express");
+const mongoose = require("mongoose");
 
 const serviceRoutes = require("../routes/serviceRoutes");
 const errorHandler = require("../middleware/errorMiddleware");
 const Service = require("../models/Service");
 const User = require("../models/User");
+const connectDB = require("../config/db");
 
 const startTestServer = () => {
   const app = express();
@@ -35,6 +37,34 @@ const approvedProvider = {
   accountStatus: "active"
 };
 
+const createFindChain = (resultFactory) => {
+  const chain = {
+    select() {
+      return chain;
+    },
+    read() {
+      return chain;
+    },
+    sort() {
+      return chain;
+    },
+    skip() {
+      return chain;
+    },
+    limit() {
+      return chain;
+    },
+    maxTimeMS() {
+      return chain;
+    },
+    lean() {
+      return resultFactory();
+    }
+  };
+
+  return chain;
+};
+
 test("POST /api/services merges image values from multiple supported fields", async () => {
   const previousSecret = process.env.JWT_SECRET;
   const token = createProviderToken();
@@ -45,6 +75,9 @@ test("POST /api/services merges image values from multiple supported fields", as
   let createdPayload = null;
 
   User.findById = () => ({
+    read() {
+      return this;
+    },
     select: async () => approvedProvider
   });
 
@@ -82,10 +115,10 @@ test("POST /api/services merges image values from multiple supported fields", as
     assert.equal(body.success, true);
     assert.equal(createdPayload.images.length, 4);
     assert.deepEqual(createdPayload.images, [
-      { imageUrl: "https://cdn.example.com/one.jpg", caption: "" },
-      { imageUrl: "https://cdn.example.com/two.jpg", caption: "" },
-      { imageUrl: "https://cdn.example.com/three.jpg", caption: "Front view" },
-      { imageUrl: "https://cdn.example.com/four.jpg", caption: "" }
+      { imageUrl: "https://cdn.example.com/one.jpg", thumbnailUrl: "", caption: "" },
+      { imageUrl: "https://cdn.example.com/two.jpg", thumbnailUrl: "", caption: "" },
+      { imageUrl: "https://cdn.example.com/three.jpg", thumbnailUrl: "", caption: "Front view" },
+      { imageUrl: "https://cdn.example.com/four.jpg", thumbnailUrl: "", caption: "" }
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -117,10 +150,15 @@ test("PUT /api/services/:id supports indexed object image payloads", async () =>
   };
 
   User.findById = () => ({
+    read() {
+      return this;
+    },
     select: async () => approvedProvider
   });
 
-  Service.findById = async () => serviceDoc;
+  Service.findById = () => ({
+    read: async () => serviceDoc
+  });
 
   const { server, baseUrl } = await startTestServer();
 
@@ -144,13 +182,122 @@ test("PUT /api/services/:id supports indexed object image payloads", async () =>
     assert.equal(response.status, 200);
     assert.equal(body.success, true);
     assert.deepEqual(body.data.images, [
-      { imageUrl: "https://cdn.example.com/a.jpg", caption: "" },
-      { imageUrl: "https://cdn.example.com/b.jpg", caption: "B" }
+      { imageUrl: "https://cdn.example.com/a.jpg", thumbnailUrl: "", caption: "" },
+      { imageUrl: "https://cdn.example.com/b.jpg", thumbnailUrl: "", caption: "B" }
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     User.findById = originalUserFindById;
     Service.findById = originalServiceFindById;
     process.env.JWT_SECRET = previousSecret;
+  }
+});
+
+test("GET /api/services serves stale cache immediately while refreshing in background", async () => {
+  const originalFind = Service.find;
+  const originalGetConnectionStatus = connectDB.getConnectionStatus;
+  const originalScheduleReconnect = connectDB.scheduleReconnect;
+  const originalReadyStateDescriptor = Object.getOwnPropertyDescriptor(mongoose.connection, "readyState");
+
+  let findCallCount = 0;
+
+  Object.defineProperty(mongoose.connection, "readyState", {
+    configurable: true,
+    value: 1,
+  });
+
+  connectDB.getConnectionStatus = () => ({
+    readyState: 1,
+    connected: true,
+    connecting: false,
+    degraded: false,
+    degradedUntil: null,
+    lastConnectionIssue: null,
+  });
+  connectDB.scheduleReconnect = () => {};
+
+  Service.find = () => {
+    findCallCount += 1;
+
+    if (findCallCount === 1) {
+      return createFindChain(async () => ([
+        {
+          _id: "service-fast",
+          serviceName: "Fast listing",
+          category: "Home",
+          description: "Fast result",
+          price: 100,
+          availabilityStatus: "Available",
+          images: [{ imageUrl: "https://cdn.example.com/a.jpg", caption: "" }],
+          providerId: "provider-1",
+          providerName: "Provider One",
+          providerAddress: "Monrovia",
+          providerProfilePhoto: "",
+          averageRating: 4.5,
+          reviewsCount: 3,
+          createdAt: new Date().toISOString(),
+        }
+      ]));
+    }
+
+    return createFindChain(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve([
+              {
+                _id: "service-slow",
+                serviceName: "Slow refresh",
+                category: "Home",
+                description: "Slow result",
+                price: 120,
+                availabilityStatus: "Available",
+                images: [{ imageUrl: "https://cdn.example.com/b.jpg", caption: "" }],
+                providerId: "provider-2",
+                providerName: "Provider Two",
+                providerAddress: "Monrovia",
+                providerProfilePhoto: "",
+                averageRating: 4.7,
+                reviewsCount: 5,
+                createdAt: new Date().toISOString(),
+              }
+            ]);
+          }, 1500);
+        })
+    );
+  };
+
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const warmResponse = await fetch(`${baseUrl}/api/services`);
+    const warmBody = await warmResponse.json();
+
+    assert.equal(warmResponse.status, 200);
+    assert.equal(warmBody.data[0].serviceName, "Fast listing");
+
+    await new Promise((resolve) => setTimeout(resolve, 5200));
+
+    const startedAt = Date.now();
+    const staleResponse = await fetch(`${baseUrl}/api/services`);
+    const elapsedMs = Date.now() - startedAt;
+    const staleBody = await staleResponse.json();
+
+    assert.equal(staleResponse.status, 200);
+    assert.equal(staleBody.meta.cache, "stale");
+    assert.equal(staleBody.data[0].serviceName, "Fast listing");
+    assert.ok(elapsedMs < 1000, `expected cached response under 1000ms, got ${elapsedMs}ms`);
+
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    assert.ok(findCallCount >= 2, "expected background refresh query to run");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    Service.find = originalFind;
+    connectDB.getConnectionStatus = originalGetConnectionStatus;
+    connectDB.scheduleReconnect = originalScheduleReconnect;
+
+    if (originalReadyStateDescriptor) {
+      Object.defineProperty(mongoose.connection, "readyState", originalReadyStateDescriptor);
+    }
   }
 });

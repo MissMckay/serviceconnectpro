@@ -51,7 +51,7 @@ exports.getAllUsers = asyncHandler(async (req, res) => {
     filter.isApproved = approved.toLowerCase() === "true";
   }
 
-  let usersQuery = User.find(filter).select("-password");
+  let usersQuery = User.find(filter).select("-password -profilePhoto").lean();
   const { query, parsedPage, parsedLimit } = applyQueryModifiers(usersQuery, {
     sort: { createdAt: -1 },
     page,
@@ -274,7 +274,7 @@ exports.getPendingProviders = asyncHandler(async (req, res) => {
   const pendingProviders = await User.find({
     role: "provider",
     isApproved: false
-  }).select("-password");
+  }).select("-password -profilePhoto").lean();
 
   res.json({
     success: true,
@@ -284,8 +284,9 @@ exports.getPendingProviders = asyncHandler(async (req, res) => {
 
 exports.getAllProviders = asyncHandler(async (req, res) => {
   const providers = await User.find({ role: "provider" })
-    .select("-password")
-    .sort({ createdAt: -1 });
+    .select("-password -profilePhoto")
+    .sort({ createdAt: -1 })
+    .lean();
 
   res.json({
     success: true,
@@ -450,7 +451,8 @@ exports.getAllServicesAdmin = asyncHandler(async (req, res) => {
     ];
   }
 
-  let servicesQuery = Service.find(filter);
+  let servicesQuery = Service.find(filter)
+    .select("serviceName category description price availabilityStatus moderationStatus providerId providerName providerPhone providerAddress averageRating reviewsCount createdAt removedAt removedBy");
   if (typeof servicesQuery.populate === "function") {
     servicesQuery = servicesQuery.populate("providerId", "name phone providerAddress");
   }
@@ -462,14 +464,14 @@ exports.getAllServicesAdmin = asyncHandler(async (req, res) => {
   });
   servicesQuery = query;
 
-  const services = await servicesQuery;
+  const services = await servicesQuery.lean();
   const total = shouldPaginate
     ? await Service.countDocuments(filter)
     : (Array.isArray(services) ? services.length : 0);
 
   const mappedServices = Array.isArray(services)
     ? services.map((service) => ({
-      ...service.toObject?.() || service,
+      ...service,
       ...(Array.isArray(service.images) ? { imagesCount: service.images.length } : {})
     }))
     : services;

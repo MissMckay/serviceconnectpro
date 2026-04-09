@@ -5,6 +5,7 @@ import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
+import { preloadBookingRoute } from "../utils/routePreload";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination } from "swiper/modules";
 import WhatsAppIcon from "../components/WhatsAppIcon";
@@ -16,11 +17,12 @@ const ServiceDetails = () => {
   const { id } = useParams();
   const { state } = useLocation();
   const navigate = useNavigate();
+  const initialService = state?.service || null;
 
-  const [service, setService] = useState(state?.service || null);
+  const [service, setService] = useState(initialService);
   const [reviews, setReviews] = useState([]);
   const [providerProfile, setProviderProfile] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !initialService);
   const [error, setError] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
@@ -94,11 +96,11 @@ const ServiceDetails = () => {
         getServiceById(id),
         getReviewsByService(id)
       ]);
-      setService(serviceData || null);
+      setService((prev) => serviceData || prev || null);
       setReviews(Array.isArray(serviceReviews) ? serviceReviews : []);
     } catch (err) {
       if (showLoading) {
-        setService(null);
+        setService((prev) => prev || null);
         setReviews([]);
         setError(err?.message || "Failed to load service details.");
       }
@@ -108,7 +110,7 @@ const ServiceDetails = () => {
   }, [id]);
 
   useEffect(() => {
-    fetchServiceDetails(true);
+    fetchServiceDetails(!initialService);
   }, [fetchServiceDetails]);
 
   useEffect(() => {
@@ -391,7 +393,9 @@ const ServiceDetails = () => {
               <button
                 type="button"
                 className="service-details-btn service-details-btn-primary"
-                onClick={() => navigate(`/book/${id}`)}
+                onClick={() => navigate(`/book/${id}`, { state: { service, from: state?.from || "services" } })}
+                onMouseEnter={() => preloadBookingRoute(id)}
+                onFocus={() => preloadBookingRoute(id)}
                 disabled={!isAvailable}
               >
                 Book Now

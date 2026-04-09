@@ -4,7 +4,76 @@ const Booking = require("../models/Booking");
 const asyncHandler = require("../utils/asyncHandler");
 const connectDB = require("../config/db");
 
+const BOOKING_QUERY_TIMEOUT_MS = 3500;
+const BOOKING_REFRESH_TIMEOUT_MS = 1200;
+const BOOKING_CACHE_TTL_MS = 15000;
+const BOOKING_CACHE_STALE_TTL_MS = 60000;
+const providerBookingsCache = new Map();
+
+const withTimeout = (promise, timeoutMs, message) =>
+  new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.name = "MongoNetworkTimeoutError";
+      error.code = "BOOKING_QUERY_TIMEOUT";
+      reject(error);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+
 const findBookingForWrite = (id) => Booking.findById(id).read("secondaryPreferred");
+
+const getProviderBookingsCacheKey = (providerId) => String(providerId || "");
+
+const getProviderBookingsCacheEntry = (providerId) => {
+  const cacheKey = getProviderBookingsCacheKey(providerId);
+  const cached = providerBookingsCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.staleUntil <= Date.now()) {
+    providerBookingsCache.delete(cacheKey);
+    return null;
+  }
+  return cached;
+};
+
+const setProviderBookingsCacheEntry = (providerId, payload) => {
+  providerBookingsCache.set(getProviderBookingsCacheKey(providerId), {
+    payload,
+    expiresAt: Date.now() + BOOKING_CACHE_TTL_MS,
+    staleUntil: Date.now() + BOOKING_CACHE_STALE_TTL_MS,
+  });
+};
+
+const clearProviderBookingsCache = (providerId) => {
+  if (providerId) {
+    providerBookingsCache.delete(getProviderBookingsCacheKey(providerId));
+    return;
+  }
+  providerBookingsCache.clear();
+};
+
+const fetchProviderBookings = async (providerId, timeoutMs = BOOKING_QUERY_TIMEOUT_MS) =>
+  withTimeout(
+    Booking.find({ providerId })
+      .select("serviceId userId providerId bookingDate status createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .populate("serviceId", "serviceName category price thumbnailUrl")
+      .populate("userId", "name email phone")
+      .maxTimeMS(timeoutMs)
+      .lean(),
+    timeoutMs,
+    `Provider bookings query exceeded ${timeoutMs}ms`
+  );
 
 const retryBookingCreate = async (payload, reason) => {
   await connectDB.forceReconnect(reason);
@@ -93,6 +162,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     }
     booking = await retryBookingCreate(bookingPayload, "createBooking-create");
   }
+  clearProviderBookingsCache(service.providerId);
 
   res.status(201).json({
     success: true,
@@ -101,13 +171,58 @@ exports.createBooking = asyncHandler(async (req, res) => {
 });
 
 exports.getProviderBookings = asyncHandler(async (req, res) => {
-  const bookings = await Booking.find({ providerId: req.user.id })
-    .populate("serviceId", "serviceName category price")
-    .populate("userId", "name email phone");
+  const providerId = String(req.user.id || "");
+  const cached = getProviderBookingsCacheEntry(providerId);
+
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({
+      success: true,
+      data: cached.payload,
+      meta: { cache: "fresh" },
+    });
+  }
+
+  if (cached?.payload) {
+    void fetchProviderBookings(providerId, BOOKING_REFRESH_TIMEOUT_MS)
+      .then((bookings) => setProviderBookingsCacheEntry(providerId, bookings))
+      .catch((error) => {
+        if (connectDB.isMongoConnectionError(error) || error?.code === "BOOKING_QUERY_TIMEOUT") {
+          connectDB.scheduleReconnect("getProviderBookings-refresh");
+        }
+      });
+
+    return res.json({
+      success: true,
+      data: cached.payload,
+      meta: { cache: "stale" },
+    });
+  }
+
+  let bookings;
+  try {
+    bookings = await fetchProviderBookings(providerId, BOOKING_QUERY_TIMEOUT_MS);
+    setProviderBookingsCacheEntry(providerId, bookings);
+  } catch (error) {
+    if (connectDB.isMongoConnectionError(error) || error?.code === "BOOKING_QUERY_TIMEOUT") {
+      connectDB.scheduleReconnect("getProviderBookings-query");
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: cached?.payload || [],
+      meta: {
+        degraded: true,
+        reason: "database_query_failed",
+        message: "Booking requests could not be refreshed right now.",
+        cache: cached?.payload ? "stale" : "none",
+      },
+    });
+  }
 
   res.json({
     success: true,
-    data: bookings
+    data: bookings,
+    meta: { cache: "refresh" },
   });
 });
 
@@ -120,9 +235,12 @@ exports.getBookingById = asyncHandler(async (req, res) => {
 
   const booking = await Booking.findById(req.params.id)
     .read("secondaryPreferred")
-    .populate("serviceId")
+    .select("serviceId userId providerId bookingDate status createdAt updatedAt")
+    .populate("serviceId", "serviceName category description price availabilityStatus providerId providerName providerAddress averageRating reviewsCount createdAt thumbnailUrl images")
     .populate("userId", "name email phone")
-    .populate("providerId", "name email providerAddress");
+    .populate("providerId", "name email providerAddress")
+    .maxTimeMS(4000)
+    .lean();
 
   if (!booking) {
     const error = new Error("Booking not found");
@@ -178,6 +296,7 @@ exports.updateBookingStatus = asyncHandler(async (req, res) => {
 
   booking.status = status;
   await saveBookingWithRetry(booking, "updateBookingStatus-save");
+  clearProviderBookingsCache(booking.providerId);
 
   res.json({
     success: true,
@@ -201,11 +320,19 @@ exports.getMyBookings = asyncHandler(async (req, res) => {
 
 // Get User Booking History (serviceId includes images for booking cards)
 exports.getUserBookings = asyncHandler(async (req, res) => {
-  const bookings = await Booking.find({
-    userId: req.user.id
-  })
-    .populate("serviceId", "serviceName price images")
-    .populate("providerId", "name email providerAddress");
+  const bookings = await withTimeout(
+    Booking.find({
+      userId: req.user.id
+    })
+      .select("serviceId userId providerId bookingDate status createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .populate("serviceId", "serviceName price thumbnailUrl providerName providerAddress")
+      .populate("providerId", "name email providerAddress")
+      .maxTimeMS(BOOKING_QUERY_TIMEOUT_MS)
+      .lean(),
+    BOOKING_QUERY_TIMEOUT_MS,
+    `User bookings query exceeded ${BOOKING_QUERY_TIMEOUT_MS}ms`
+  );
 
   res.json({
     success: true,
@@ -231,6 +358,7 @@ exports.cancelBooking = asyncHandler(async (req, res) => {
 
   booking.status = "Cancelled";
   await saveBookingWithRetry(booking, "cancelBooking-save");
+  clearProviderBookingsCache(booking.providerId);
 
   res.json({
     success: true,
@@ -264,6 +392,7 @@ exports.deleteBooking = asyncHandler(async (req, res) => {
   }
 
   await deleteBookingWithRetry(booking, "deleteBooking-delete");
+  clearProviderBookingsCache(booking.providerId);
 
   res.json({
     success: true,

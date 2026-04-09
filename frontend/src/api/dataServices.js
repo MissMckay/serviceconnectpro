@@ -4,6 +4,7 @@ const POLL_MS = 10000;
 const CACHE_TTL_MS = 15000;
 const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
 const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
+const MAX_SERVICE_IMAGE_COUNT = 7;
 const responseCache = new Map();
 const inflightRequests = new Map();
 let publicDataPrewarmPromise = null;
@@ -97,7 +98,14 @@ function normalizeServiceList(list) {
     id: s._id,
     ...s,
     createdAt: s.createdAt ? new Date(s.createdAt) : null,
-    thumbnailUrl: s.thumbnailUrl || (Array.isArray(s.images) && s.images[0]?.imageUrl) || null,
+    thumbnailUrl:
+      (Array.isArray(s.images) && (s.images[0]?.thumbnailUrl || s.images[0]?.imageUrl)) ||
+      s.thumbnailUrl ||
+      null,
+    providerProfilePhoto:
+      typeof s.providerProfilePhoto === "string" && s.providerProfilePhoto.startsWith("data:")
+        ? ""
+        : s.providerProfilePhoto || "",
   }));
 }
 
@@ -504,10 +512,9 @@ export async function createService(providerId, data) {
     description: String(data.description ?? "").trim(),
     price,
     availabilityStatus: String(data.availabilityStatus || "Available"),
-    images: Array.isArray(data.images) ? data.images.slice(0, 10) : [],
+    images: Array.isArray(data.images) ? data.images.slice(0, MAX_SERVICE_IMAGE_COUNT) : [],
     providerName: data.providerName ?? "",
     providerAddress: data.providerAddress ?? "",
-    providerProfilePhoto: data.providerProfilePhoto ?? "",
   };
   const res = await api.post("services", body);
   clearCacheByPrefix("services:");
@@ -524,8 +531,9 @@ export async function updateService(serviceId, data) {
   if (data.description != null) body.description = data.description;
   if (data.price != null) body.price = Number(data.price);
   if (data.availabilityStatus != null) body.availabilityStatus = data.availabilityStatus;
-  if (data.images != null) body.images = Array.isArray(data.images) ? data.images.slice(0, 10) : [];
-  if (data.providerProfilePhoto != null) body.providerProfilePhoto = data.providerProfilePhoto;
+  if (data.images != null) body.images = Array.isArray(data.images) ? data.images.slice(0, MAX_SERVICE_IMAGE_COUNT) : [];
+  if (data.providerName != null) body.providerName = data.providerName;
+  if (data.providerAddress != null) body.providerAddress = data.providerAddress;
   await api.put(`services/${serviceId}`, body);
   clearCacheByPrefix("services:");
   clearCacheByPrefix(getCacheKey("service", serviceId));
@@ -642,17 +650,24 @@ export async function getBookingById(bookingId) {
 // ---------- Conversations & Messages ----------
 export async function getOrCreateConversation(myId, otherId) {
   try {
-    const res = await api.get(`messages/get-or-create-conversation?otherId=${encodeURIComponent(otherId)}`);
-    const c = res?.data ?? res;
-    return c
-      ? {
-          _id: c._id,
-          id: c._id,
-          ...c,
-          lastMessageAt: c.lastMessageAt ? new Date(c.lastMessageAt) : null,
-          createdAt: c.createdAt ? new Date(c.createdAt) : null,
-        }
-      : null;
+    return await getCachedOrFetch(
+      getCacheKey("conversation-link", [myId || "me", otherId || ""].join(":")),
+      async () => {
+        const res = await api.get(`messages/get-or-create-conversation?otherId=${encodeURIComponent(otherId)}`);
+        const payload = res?.data ?? res;
+        const c = payload?.data ?? payload;
+        return c
+          ? {
+              _id: c._id,
+              id: c._id,
+              ...c,
+              lastMessageAt: c.lastMessageAt ? new Date(c.lastMessageAt) : null,
+              createdAt: c.createdAt ? new Date(c.createdAt) : null,
+            }
+          : null;
+      },
+      { ttlMs: 30000 }
+    );
   } catch (e) {
     throw e;
   }
@@ -660,21 +675,28 @@ export async function getOrCreateConversation(myId, otherId) {
 
 export async function getConversations(userId) {
   try {
-    const res = await api.get("messages/conversations");
-    const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
-    return list.map((c) => ({
-      _id: c._id,
-      id: c._id,
-      ...c,
-      lastMessageAt: c.lastMessageAt ? new Date(c.lastMessageAt) : null,
-      createdAt: c.createdAt ? new Date(c.createdAt) : null,
-    }));
+    return await getCachedOrFetch(
+      getCacheKey("conversations", userId || "me"),
+      async () => {
+        const res = await api.get("messages/conversations");
+        const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
+        return list.map((c) => ({
+          _id: c._id,
+          id: c._id,
+          ...c,
+          lastMessageAt: c.lastMessageAt ? new Date(c.lastMessageAt) : null,
+          createdAt: c.createdAt ? new Date(c.createdAt) : null,
+        }));
+      },
+      { ttlMs: 10000 }
+    );
   } catch {
     return [];
   }
 }
 
 export function subscribeConversations(userId, setData) {
+  const cacheKey = getCacheKey("conversations", userId || "me");
   const fetchList = async () => {
     try {
       const list = await getConversations(userId);
@@ -683,19 +705,29 @@ export function subscribeConversations(userId, setData) {
       if (setData) setData([]);
     }
   };
-  return createWindowAwarePoller(fetchList, 15000);
+  const cached = responseCache.get(cacheKey);
+  if (cached?.value && setData) {
+    setData(cached.value);
+  }
+  return createWindowAwarePoller(fetchList, 8000);
 }
 
 export async function getMessages(conversationId) {
   try {
-    const res = await api.get(`messages/conversations/${conversationId}/messages`);
-    const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
-    return list.map((m) => ({
-      _id: m._id,
-      id: m._id,
-      ...m,
-      createdAt: m.createdAt ? new Date(m.createdAt) : null,
-    }));
+    return await getCachedOrFetch(
+      getCacheKey("messages", conversationId),
+      async () => {
+        const res = await api.get(`messages/conversations/${conversationId}/messages`);
+        const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
+        return list.map((m) => ({
+          _id: m._id,
+          id: m._id,
+          ...m,
+          createdAt: m.createdAt ? new Date(m.createdAt) : null,
+        }));
+      },
+      { ttlMs: 5000 }
+    );
   } catch {
     return [];
   }
@@ -706,6 +738,7 @@ export function subscribeMessages(conversationId, setData) {
     if (setData) setData([]);
     return noopUnsub;
   }
+  const cacheKey = getCacheKey("messages", conversationId);
   const fetchList = async () => {
     try {
       const list = await getMessages(conversationId);
@@ -714,29 +747,51 @@ export function subscribeMessages(conversationId, setData) {
       if (setData) setData([]);
     }
   };
-  return createWindowAwarePoller(fetchList, 15000);
+  const cached = responseCache.get(cacheKey);
+  if (cached?.value && setData) {
+    setData(cached.value);
+  }
+  return createWindowAwarePoller(fetchList, 5000);
 }
 
-export async function sendMessage(conversationId, senderId, text) {
-  const res = await api.post("messages", {
-    conversationId,
+export async function sendMessage(conversationId, senderId, text, options = {}) {
+  const body = {
     text: String(text).trim(),
-  });
-  const m = res?.data ?? res;
-  return m._id || m.id;
+  };
+  if (conversationId) body.conversationId = conversationId;
+  if (options?.recipientId) body.recipientId = options.recipientId;
+  const res = await api.post("messages", body);
+  clearCacheByPrefix(getCacheKey("messages", conversationId));
+  clearCacheByPrefix("conversations:");
+  const payload = res?.data ?? res;
+  const m = payload?.data ?? payload;
+  return m
+    ? {
+        _id: m._id || m.id,
+        id: m._id || m.id,
+        ...m,
+        createdAt: m.createdAt ? new Date(m.createdAt) : new Date(),
+      }
+    : null;
 }
 
 // ---------- Reviews ----------
 export async function getReviewsByService(serviceId) {
+  if (!serviceId) return [];
   try {
-    const res = await api.get(`reviews/service/${serviceId}`);
-    const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
-    return list.map((r) => ({
-      _id: r._id,
-      id: r._id,
-      ...r,
-      createdAt: r.createdAt ? new Date(r.createdAt) : null,
-    }));
+    return await getCachedOrFetch(
+      getCacheKey("reviews", serviceId),
+      async () => {
+        const res = await api.get(`reviews/service/${serviceId}`);
+        const list = Array.isArray(res?.data) ? res.data : res?.data?.data ?? [];
+        return list.map((r) => ({
+          _id: r._id,
+          id: r._id,
+          ...r,
+          createdAt: r.createdAt ? new Date(r.createdAt) : null,
+        }));
+      }
+    );
   } catch {
     return [];
   }

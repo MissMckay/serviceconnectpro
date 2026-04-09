@@ -13,6 +13,11 @@ let lastLoggedIssueKey = null;
 
 const CONNECTED_STATE = 1;
 const CONNECTING_STATE = 2;
+const VERIFY_RETRYABLE_NAMES = new Set([
+  "MongoNotConnectedError",
+  "MongoNetworkTimeoutError",
+  "MongoServerSelectionError",
+]);
 
 const setDegradedState = (error, reason = "unknown") => {
   const cooldownMs = getIntEnv("MONGO_DEGRADED_COOLDOWN_MS", 15000);
@@ -96,6 +101,7 @@ const isMongoConnectionError = (error) => {
     error.name === "MongoNetworkError",
     error.name === "MongoNetworkTimeoutError",
     error.name === "MongoServerSelectionError",
+    error.name === "MongoNotConnectedError",
     message.includes("timed out"),
     message.includes("connection"),
     message.includes("server selection"),
@@ -221,10 +227,35 @@ const logConnectionGuidance = (error, attempt, maxRetries, usingStandardUri) => 
 };
 
 const verifyConnection = async () => {
-  try {
-    await mongoose.connection.db.admin().ping();
-  } catch (error) {
-    throw error;
+  const maxAttempts = Math.max(1, getIntEnv("MONGO_VERIFY_RETRIES", 3));
+  const retryDelayMs = Math.max(100, getIntEnv("MONGO_VERIFY_RETRY_DELAY_MS", 250));
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const db = mongoose.connection?.db;
+    if (!db) {
+      if (attempt === maxAttempts) {
+        const error = new Error("MongoDB connection is not ready yet.");
+        error.name = "MongoNotConnectedError";
+        throw error;
+      }
+      await sleep(retryDelayMs);
+      continue;
+    }
+
+    try {
+      await db.admin().ping();
+      return;
+    } catch (error) {
+      const shouldRetry =
+        attempt < maxAttempts &&
+        (VERIFY_RETRYABLE_NAMES.has(error?.name) || isMongoConnectionError(error));
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      await sleep(retryDelayMs * attempt);
+    }
   }
 };
 

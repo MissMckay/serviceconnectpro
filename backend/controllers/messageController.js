@@ -3,35 +3,108 @@ const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
+const connectDB = require("../config/db");
+
+const CACHE_TTL_MS = 15000;
+const CACHE_STALE_TTL_MS = 2 * 60 * 1000;
+const MESSAGES_QUERY_TIMEOUT_MS = 2500;
+const MESSAGES_REFRESH_TIMEOUT_MS = 900;
+
+const conversationsCache = new Map();
+const messagesCache = new Map();
+const refreshPromises = new Map();
 
 function participantKey(myId, otherId) {
   if (!myId || !otherId) return null;
   return [String(myId), String(otherId)].sort().join("_");
 }
 
-exports.getConversations = asyncHandler(async (req, res) => {
-  const currentId = req.user?.id ? String(req.user.id) : null;
-  if (!currentId) {
-    return res.status(400).json({ message: "Invalid user" });
-  }
+const withTimeout = (promise, timeoutMs, message) =>
+  new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      error.code = "MESSAGE_QUERY_TIMEOUT";
+      reject(error);
+    }, timeoutMs);
 
-  const conversations = await Conversation.find({ participants: currentId })
-    .read("secondaryPreferred")
-    .sort({ lastMessageAt: -1 })
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+
+const getCacheEntry = (cache, key) => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.staleUntil <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return cached;
+};
+
+const setCacheEntry = (cache, key, payload) => {
+  cache.set(key, {
+    payload,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+    staleUntil: Date.now() + CACHE_STALE_TTL_MS,
+  });
+};
+
+const clearMessageCaches = (conversationId, participantIds = []) => {
+  if (conversationId) messagesCache.delete(`messages:${String(conversationId)}`);
+  participantIds.forEach((participantId) => {
+    if (participantId) conversationsCache.delete(`conversations:${String(participantId)}`);
+  });
+};
+
+const buildMeta = ({ degraded = false, reason = null, message = null, cache = "none", debug = null } = {}) => ({
+  degraded,
+  reason,
+  message,
+  cache,
+  ...(debug ? { debug } : {}),
+});
+
+const buildUserLookupMap = async (ids = []) => {
+  const normalizedIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!normalizedIds.length) return new Map();
+
+  const users = await User.find({ _id: { $in: normalizedIds } })
+    .select("name email profilePhoto")
     .lean();
 
-  const list = [];
-  for (const conv of conversations) {
+  return new Map(
+    users.map((user) => [String(user._id), { _id: user._id, id: user._id, ...user }])
+  );
+};
+
+const fetchConversationsPayload = async (currentId, timeoutMs = MESSAGES_QUERY_TIMEOUT_MS) => {
+  const conversations = await withTimeout(
+    Conversation.find({ participants: currentId })
+      .sort({ lastMessageAt: -1 })
+      .lean(),
+    timeoutMs,
+    `Conversations query exceeded ${timeoutMs}ms`
+  );
+
+  const otherIds = conversations
+    .map((conv) => (conv.participants || []).find((p) => String(p) !== currentId))
+    .filter(Boolean);
+  const usersById = await buildUserLookupMap(otherIds);
+
+  return conversations.map((conv) => {
     const otherId = (conv.participants || []).find((p) => String(p) !== currentId);
-    let otherUser = null;
-    if (otherId) {
-      const u = await User.findById(otherId)
-        .read("secondaryPreferred")
-        .select("name email profilePhoto")
-        .lean();
-      otherUser = u ? { _id: u._id, id: u._id, ...u } : { _id: otherId, id: otherId, name: "Unknown" };
-    }
-    list.push({
+    const otherUser = otherId
+      ? usersById.get(String(otherId)) || { _id: otherId, id: otherId, name: "Unknown" }
+      : null;
+    return {
       _id: conv._id,
       id: conv._id,
       participants: conv.participants,
@@ -40,10 +113,110 @@ exports.getConversations = asyncHandler(async (req, res) => {
       lastMessagePreview: conv.lastMessagePreview || "",
       bookingId: conv.bookingId || null,
       otherUser,
-    });
+    };
+  });
+};
+
+const fetchMessagesPayload = async (conversationId, currentId, timeoutMs = MESSAGES_QUERY_TIMEOUT_MS) => {
+  const conv = await withTimeout(
+    Conversation.findById(conversationId).lean(),
+    timeoutMs,
+    `Conversation lookup exceeded ${timeoutMs}ms`
+  );
+  if (!conv) {
+    const error = new Error("Conversation not found");
+    error.statusCode = 404;
+    throw error;
   }
 
-  res.json({ success: true, data: list });
+  const isParticipant = (conv.participants || []).some((p) => String(p) === currentId);
+  if (!isParticipant) {
+    const error = new Error("Access denied");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const messages = await withTimeout(
+    Message.find({ conversationId: conv._id })
+      .sort({ createdAt: 1 })
+      .lean(),
+    timeoutMs,
+    `Messages query exceeded ${timeoutMs}ms`
+  );
+
+  const sendersById = await buildUserLookupMap(messages.map((message) => message.senderId));
+  return messages.map((m) => {
+    const sender = sendersById.get(String(m.senderId));
+    return {
+      ...m,
+      senderId: m.senderId,
+      user: sender
+        ? { name: sender.name, profilePhoto: sender.profilePhoto }
+        : { name: "Unknown" },
+    };
+  });
+};
+
+exports.getConversations = asyncHandler(async (req, res) => {
+  const currentId = req.user?.id ? String(req.user.id) : null;
+  if (!currentId) {
+    return res.status(400).json({ message: "Invalid user" });
+  }
+  const cacheKey = `conversations:${currentId}`;
+  const cached = getCacheEntry(conversationsCache, cacheKey);
+
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({ success: true, data: cached.payload, meta: buildMeta({ cache: "fresh" }) });
+  }
+
+  if (cached?.payload) {
+    const refreshKey = `refresh:${cacheKey}`;
+    if (!refreshPromises.has(refreshKey)) {
+      refreshPromises.set(
+        refreshKey,
+        fetchConversationsPayload(currentId, MESSAGES_REFRESH_TIMEOUT_MS)
+          .then((payload) => {
+            setCacheEntry(conversationsCache, cacheKey, payload);
+            return payload;
+          })
+          .catch((error) => {
+            if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+              connectDB.scheduleReconnect("getConversations-refresh-failed");
+            }
+            return cached.payload;
+          })
+          .finally(() => refreshPromises.delete(refreshKey))
+      );
+    }
+
+    return res.json({ success: true, data: cached.payload, meta: buildMeta({ cache: "stale" }) });
+  }
+
+  try {
+    const payload = await fetchConversationsPayload(currentId);
+    setCacheEntry(conversationsCache, cacheKey, payload);
+    return res.json({ success: true, data: payload, meta: buildMeta({ cache: "refresh" }) });
+  } catch (error) {
+    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+      connectDB.scheduleReconnect("getConversations-query-failed");
+      return res.status(200).json({
+        success: true,
+        data: cached?.payload || [],
+        meta: buildMeta({
+          degraded: true,
+          reason: "database_query_failed",
+          message: "Messages are temporarily loading from fallback data.",
+          cache: cached?.payload ? "stale" : "none",
+          debug: {
+            name: error?.name || "Error",
+            code: error?.code || null,
+            message: error?.message || "Unknown conversations failure",
+          },
+        }),
+      });
+    }
+    throw error;
+  }
 });
 
 exports.getMessages = asyncHandler(async (req, res) => {
@@ -51,39 +224,62 @@ exports.getMessages = asyncHandler(async (req, res) => {
   if (!conversationId || !mongoose.Types.ObjectId.isValid(conversationId)) {
     return res.status(400).json({ message: "Valid conversationId is required" });
   }
-
-  const conv = await Conversation.findById(conversationId)
-    .read("secondaryPreferred")
-    .lean();
-  if (!conv) {
-    return res.status(404).json({ message: "Conversation not found" });
-  }
-
   const currentId = String(req.user.id);
-  const isParticipant = (conv.participants || []).some((p) => String(p) === currentId);
-  if (!isParticipant) {
-    return res.status(403).json({ message: "Access denied" });
+  const cacheKey = `messages:${String(conversationId)}`;
+  const cached = getCacheEntry(messagesCache, cacheKey);
+
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({ success: true, data: cached.payload, meta: buildMeta({ cache: "fresh" }) });
   }
 
-  const messages = await Message.find({ conversationId: conv._id })
-    .read("secondaryPreferred")
-    .sort({ createdAt: 1 })
-    .lean();
+  if (cached?.payload) {
+    const refreshKey = `refresh:${cacheKey}`;
+    if (!refreshPromises.has(refreshKey)) {
+      refreshPromises.set(
+        refreshKey,
+        fetchMessagesPayload(conversationId, currentId, MESSAGES_REFRESH_TIMEOUT_MS)
+          .then((payload) => {
+            setCacheEntry(messagesCache, cacheKey, payload);
+            return payload;
+          })
+          .catch((error) => {
+            if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+              connectDB.scheduleReconnect("getMessages-refresh-failed");
+            }
+            return cached.payload;
+          })
+          .finally(() => refreshPromises.delete(refreshKey))
+      );
+    }
 
-  const withSender = [];
-  for (const m of messages) {
-    const u = await User.findById(m.senderId)
-      .read("secondaryPreferred")
-      .select("name profilePhoto")
-      .lean();
-    withSender.push({
-      ...m,
-      senderId: m.senderId,
-      user: u ? { name: u.name, profilePhoto: u.profilePhoto } : { name: "Unknown" },
-    });
+    return res.json({ success: true, data: cached.payload, meta: buildMeta({ cache: "stale" }) });
   }
 
-  res.json({ success: true, data: withSender });
+  try {
+    const payload = await fetchMessagesPayload(conversationId, currentId);
+    setCacheEntry(messagesCache, cacheKey, payload);
+    return res.json({ success: true, data: payload, meta: buildMeta({ cache: "refresh" }) });
+  } catch (error) {
+    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+      connectDB.scheduleReconnect("getMessages-query-failed");
+      return res.status(200).json({
+        success: true,
+        data: cached?.payload || [],
+        meta: buildMeta({
+          degraded: true,
+          reason: "database_query_failed",
+          message: "This conversation is temporarily loading from fallback data.",
+          cache: cached?.payload ? "stale" : "none",
+          debug: {
+            name: error?.name || "Error",
+            code: error?.code || null,
+            message: error?.message || "Unknown messages failure",
+          },
+        }),
+      });
+    }
+    throw error;
+  }
 });
 
 exports.getOrCreateConversation = asyncHandler(async (req, res) => {
@@ -97,7 +293,6 @@ exports.getOrCreateConversation = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Invalid user ids" });
   }
   let conv = await Conversation.findOne({ participantKey: key })
-    .read("secondaryPreferred")
     .lean();
   if (!conv) {
     conv = await Conversation.create({
@@ -173,6 +368,13 @@ exports.sendMessage = asyncHandler(async (req, res) => {
   await conversation.save();
 
   const populated = await Message.findById(message._id).lean();
+  clearMessageCaches(conversation._id, conversation.participants || []);
+  setCacheEntry(messagesCache, `messages:${String(conversation._id)}`, [
+    ...((getCacheEntry(messagesCache, `messages:${String(conversation._id)}`)?.payload || []).filter(
+      (entry) => String(entry?._id) !== String(populated?._id)
+    )),
+    populated,
+  ]);
 
   const io = req.app.get("io");
   if (io) {

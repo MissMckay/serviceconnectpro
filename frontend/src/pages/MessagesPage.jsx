@@ -23,8 +23,10 @@ export default function MessagesPage() {
   const [error, setError] = useState("");
   const messagesEndRef = useRef(null);
 
-  const selectedConversation = conversations.find((c) => c._id === selected?.id);
-  const otherUser = selectedConversation?.otherUser || (compose ? { _id: compose.recipientId, name: compose.recipientName } : null);
+  const selectedConversation = conversations.find((c) => String(c._id) === String(selected?.id));
+  const otherUser =
+    selectedConversation?.otherUser ||
+    (compose ? { _id: compose.recipientId, name: compose.recipientName } : null);
 
   useEffect(() => {
     const state = location.state;
@@ -35,6 +37,31 @@ export default function MessagesPage() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId || !compose?.recipientId) return;
+
+    let cancelled = false;
+
+    const ensureConversation = async () => {
+      try {
+        const conv = await getOrCreateConversation(currentUserId, String(compose.recipientId));
+        if (cancelled || !conv?._id) return;
+        setSelected({ id: conv._id });
+        setCompose(null);
+        setError("");
+      } catch (err) {
+        if (cancelled) return;
+        setError(err?.message || "Failed to open conversation.");
+      }
+    };
+
+    ensureConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [compose?.recipientId, currentUserId]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -61,7 +88,7 @@ export default function MessagesPage() {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!loading && compose && conversations.length > 0) {
+    if (!loading && compose && conversations.length > 0 && !selected?.id) {
       const match = conversations.find(
         (c) => c.otherUser && String(c.otherUser._id) === String(compose.recipientId)
       );
@@ -70,7 +97,7 @@ export default function MessagesPage() {
         setCompose(null);
       }
     }
-  }, [loading, conversations, compose]);
+  }, [loading, conversations, compose, selected?.id]);
 
   useEffect(() => {
     if (!selected?.id) {
@@ -90,12 +117,24 @@ export default function MessagesPage() {
   const handleSend = async (e) => {
     e.preventDefault();
     const text = input.trim();
-    const rawRecipient = otherUser?._id;
+    const rawRecipient = otherUser?._id || compose?.recipientId || selectedConversation?.otherUser?._id;
     const recipientId = rawRecipient != null ? String(rawRecipient) : null;
     if (!text || sending || !currentUserId) return;
 
+    const optimisticId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      _id: optimisticId,
+      id: optimisticId,
+      senderId: currentUserId,
+      text,
+      createdAt: new Date(),
+      pending: true,
+    };
+
     setSending(true);
     setError("");
+    setInput("");
+    setMessages((prev) => [...prev, optimisticMessage]);
     try {
       let convId = selected?.id;
       if (compose && recipientId) {
@@ -104,11 +143,18 @@ export default function MessagesPage() {
         setSelected({ id: convId });
         setCompose(null);
       }
-      if (convId) {
-        await sendMessageToFirestore(convId, currentUserId, text);
-        setInput("");
+      if (convId || recipientId) {
+        const savedMessage = await sendMessageToFirestore(convId, currentUserId, text, { recipientId });
+        setMessages((prev) => [
+          ...prev.filter((message) => message._id !== optimisticId),
+          ...(savedMessage ? [savedMessage] : []),
+        ]);
+      } else {
+        throw new Error("Unable to determine who to message.");
       }
     } catch (err) {
+      setMessages((prev) => prev.filter((message) => message._id !== optimisticId));
+      setInput(text);
       setError(err?.message || "Failed to send message.");
     } finally {
       setSending(false);

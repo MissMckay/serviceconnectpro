@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import {
   getPublicServicesSnapshot,
-  getUserProfile,
   subscribeServices,
+  getUserProfile,
 } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getFirstServiceImageUrl } from "../utils/serviceMedia";
@@ -14,12 +14,15 @@ import {
   matchesLocationQuery,
 } from "../utils/serviceSearch";
 import {
-  getEntityId,
   getLiveProviderPhoto,
   getServiceProviderId,
   serviceHasProviderSummary,
 } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
+import {
+  preloadBookingRoute,
+  preloadServiceDetailsRoute,
+} from "../utils/routePreload";
 
 const INITIAL_SKELETON_COUNT = 6;
 
@@ -28,7 +31,6 @@ const ServiceListing = () => {
   const { user } = useContext(AuthContext);
   const role = user ? String(user.role || "").toLowerCase() : "";
   const [services, setServices] = useState(() => getPublicServicesSnapshot());
-  const [providerProfiles, setProviderProfiles] = useState({});
   const [searchInputs, setSearchInputs] = useState({
     selectedCategory: "All",
     location: "",
@@ -46,6 +48,7 @@ const ServiceListing = () => {
   const [activeQuickFilter, setActiveQuickFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(() => services.length === 0);
   const [error, setError] = useState("");
+  const [providerProfiles, setProviderProfiles] = useState({});
   const deferredServices = useDeferredValue(services);
 
   useEffect(() => {
@@ -68,108 +71,52 @@ const ServiceListing = () => {
   }, [appliedFilters]);
 
   useEffect(() => {
-    const providerIds = [
-      ...new Set(deferredServices.map(getServiceProviderId).filter(Boolean)),
-    ];
+    const providersNeedingHydration = deferredServices.filter(
+      (service) =>
+        getServiceProviderId(service) &&
+        !providerProfiles[getServiceProviderId(service)] &&
+        (
+          !serviceHasProviderSummary(service) ||
+          !getLiveProviderPhoto(service, providerProfiles)
+        )
+    );
 
-    if (!providerIds.length) {
-      setProviderProfiles({});
-      return undefined;
-    }
+    if (!providersNeedingHydration.length) return undefined;
 
     let cancelled = false;
 
-    const embeddedProfiles = deferredServices.reduce((acc, service) => {
-      const providerId = getServiceProviderId(service);
-      if (!providerId) return acc;
-
-      const embeddedProfile =
-        (typeof service?.providerId === "object" && service.providerId) ||
-        service?.provider ||
-        service?.createdBy ||
-        service?.owner;
-
-      if (!embeddedProfile || typeof embeddedProfile !== "object") {
-        return acc;
-      }
-
-      acc[providerId] = {
-        id: providerId,
-        _id: providerId,
-        ...embeddedProfile,
-      };
-
-      return acc;
-    }, {});
-
-    setProviderProfiles((prev) => ({ ...prev, ...embeddedProfiles }));
-
-    const missingProviderIds = providerIds.filter((providerId) => {
-      const matchingService = deferredServices.find(
-        (service) => getServiceProviderId(service) === providerId
-      );
-      if (matchingService && serviceHasProviderSummary(matchingService)) {
-        return false;
-      }
-      const embedded = embeddedProfiles[providerId];
-      return !embedded?.profilePhoto && !embedded?.name && !embedded?.fullName;
-    });
-
-    if (!missingProviderIds.length) {
-      return undefined;
-    }
-
-    const loadProfiles = async () => {
+    const hydrateProviderProfiles = async () => {
       const profiles = await Promise.all(
-        missingProviderIds.map((providerId) => getUserProfile(providerId))
+        providersNeedingHydration.map((service) => getUserProfile(getServiceProviderId(service)))
       );
 
       if (cancelled) return;
 
       const nextProfiles = profiles.reduce((acc, profile) => {
-        const providerId = getEntityId(profile);
+        const providerId = profile?._id || profile?.id;
         if (providerId) acc[providerId] = profile;
         return acc;
       }, {});
 
-      setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
+      if (Object.keys(nextProfiles).length) {
+        setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
+      }
     };
 
-    let timeoutId;
-    let idleId;
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleId = window.requestIdleCallback(() => {
-        loadProfiles();
-      }, { timeout: 1200 });
-    } else {
-      timeoutId = window.setTimeout(() => {
-        loadProfiles();
-      }, 250);
-    }
+    hydrateProviderProfiles();
 
     return () => {
       cancelled = true;
-
-      if (
-        typeof idleId === "number" &&
-        typeof window !== "undefined" &&
-        "cancelIdleCallback" in window
-      ) {
-        window.cancelIdleCallback(idleId);
-      }
-
-      if (typeof timeoutId === "number") {
-        window.clearTimeout(timeoutId);
-      }
     };
-  }, [deferredServices]);
+  }, [deferredServices, providerProfiles]);
 
-  const handleBookingClick = (serviceId) => {
+  const handleBookingClick = (serviceId, service) => {
     if (!user) {
       navigate("/login");
     } else {
-      navigate(`/book/${serviceId}`);
+      navigate(`/book/${serviceId}`, {
+        state: { service, from: "services" },
+      });
     }
   };
 
@@ -510,14 +457,10 @@ const ServiceListing = () => {
 
       <header className="services-page__header">
         <div className="services-page__header-row">
-          <div>
+          <div className="services-page__title-block">
             <h1 className="services-page__title">
               Available Services provided in Liberia
             </h1>
-            <p className="services-page__subtitle">
-              Find and book trusted local services. Filter by category,
-              location, or price.
-            </p>
           </div>
         </div>
       </header>
@@ -743,18 +686,19 @@ const ServiceListing = () => {
       {!isLoading && !error && sortedServices.length > 0 && (
         <div className="service-listing-grid">
           {sortedServices.map((service) => {
+            const hydratedService = service;
             const { average: embeddedAvg, count: embeddedCount } =
-              getAverageRatingAndCount(service);
+              getAverageRatingAndCount(hydratedService);
 
-            const displayRating = Number.isFinite(Number(service?.averageRating))
-              ? Number(service.averageRating)
+            const displayRating = Number.isFinite(Number(hydratedService?.averageRating))
+              ? Number(hydratedService.averageRating)
               : embeddedAvg;
 
-            const reviewCount = Number.isFinite(Number(service?.reviewsCount))
-              ? Number(service.reviewsCount)
+            const reviewCount = Number.isFinite(Number(hydratedService?.reviewsCount))
+              ? Number(hydratedService.reviewsCount)
               : embeddedCount;
 
-            const description = service?.description || "";
+            const description = hydratedService?.description || "";
             const truncatedDesc =
               description.length > DESCRIPTION_PREVIEW_LENGTH
                 ? `${description
@@ -762,41 +706,44 @@ const ServiceListing = () => {
                     .trim()}…`
                 : description;
 
-            const providerName = getProviderName(service);
-            const providerPhone = getProviderPhone(service);
-            const location = getServiceLocation(service) || getProviderAddress(service);
+            const providerName = getProviderName(hydratedService);
+            const providerPhone = getProviderPhone(hydratedService);
+            const location = getServiceLocation(hydratedService) || getProviderAddress(hydratedService);
             const locationDisplay =
               location && location !== "Not provided" ? location : "";
 
             const isAvailable =
-              (service?.availabilityStatus || "").toLowerCase() === "available";
+              (hydratedService?.availabilityStatus || "").toLowerCase() === "available";
 
-            const providerPhoto = getLiveProviderPhoto(service, providerProfiles);
-            const firstImageUrl = getFirstServiceImageUrl(service);
+            const providerPhoto = getLiveProviderPhoto(hydratedService, providerProfiles);
+            const firstImageUrl = getFirstServiceImageUrl(hydratedService);
+            const cardImageUrl = firstImageUrl || providerPhoto || "";
 
             const createdAtTime =
-              service?.createdAt instanceof Date
-                ? service.createdAt.getTime()
-                : new Date(service?.createdAt || 0).getTime();
+              hydratedService?.createdAt instanceof Date
+                ? hydratedService.createdAt.getTime()
+                : new Date(hydratedService?.createdAt || 0).getTime();
 
             const isFresh =
               Number.isFinite(createdAtTime) &&
               createdAtTime >= Date.now() - 7 * 24 * 60 * 60 * 1000;
 
             return (
-              <article key={service._id} className="sc-card">
+              <article key={hydratedService._id} className="sc-card">
                 <button
                   type="button"
                   className="sc-card__image-wrap"
-                  onClick={() => handleReviewClick(service._id, service)}
+                  onClick={() => handleReviewClick(hydratedService._id, hydratedService)}
+                  onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
+                  onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
                   aria-label={`Open details for ${
-                    service.serviceName || "this service"
+                    hydratedService.serviceName || "this service"
                   }`}
                 >
-                  {firstImageUrl ? (
+                  {cardImageUrl ? (
                     <img
-                      src={firstImageUrl}
-                      alt={service.serviceName || "Service"}
+                      src={cardImageUrl}
+                      alt={hydratedService.serviceName || "Service"}
                       className="sc-card__image"
                       loading="lazy"
                       decoding="async"
@@ -841,7 +788,7 @@ const ServiceListing = () => {
 
                   <div
                     className="sc-card__image-placeholder"
-                    style={{ display: firstImageUrl ? "none" : "flex" }}
+                    style={{ display: cardImageUrl ? "none" : "flex" }}
                   >
                     No photo
                   </div>
@@ -851,7 +798,7 @@ const ServiceListing = () => {
                   <div className="sc-card__tags-row">
                     <div className="sc-card__tags">
                       <span className="sc-card__tag sc-card__tag--category">
-                        {service?.category || "General"}
+                        {hydratedService?.category || "General"}
                       </span>
                       <span
                         className="sc-card__tag sc-card__tag--location"
@@ -874,7 +821,7 @@ const ServiceListing = () => {
                     </span>
                   </div>
 
-                  <h3 className="sc-card__title">{service.serviceName}</h3>
+                  <h3 className="sc-card__title">{hydratedService.serviceName}</h3>
 
                   {truncatedDesc && (
                     <p className="sc-card__desc">{truncatedDesc}</p>
@@ -894,7 +841,7 @@ const ServiceListing = () => {
                   <div className="sc-card__bottom">
                     <div className="sc-card__price-rating">
                       <span className="sc-card__price">
-                        {formatLrdPrice(service?.price)}
+                        {formatLrdPrice(hydratedService?.price)}
                       </span>
                       <span className="sc-card__rating">
                         {formatStars(displayRating)}
@@ -915,7 +862,9 @@ const ServiceListing = () => {
                       <button
                         type="button"
                         className="sc-card__btn sc-card__btn--secondary"
-                        onClick={() => handleReviewClick(service._id, service)}
+                        onClick={() => handleReviewClick(hydratedService._id, hydratedService)}
+                        onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
+                        onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
                       >
                         View details
                       </button>
@@ -924,7 +873,9 @@ const ServiceListing = () => {
                         <button
                           type="button"
                           className="sc-card__btn sc-card__btn--primary"
-                          onClick={() => handleBookingClick(service._id)}
+                          onClick={() => handleBookingClick(hydratedService._id, hydratedService)}
+                          onMouseEnter={() => preloadBookingRoute(hydratedService._id)}
+                          onFocus={() => preloadBookingRoute(hydratedService._id)}
                           disabled={!isAvailable}
                         >
                           Book Now

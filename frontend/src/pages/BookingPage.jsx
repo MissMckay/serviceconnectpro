@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { getServiceById, getReviewsByService, createBooking } from "../firebase/firestoreServices";
 import { formatStars } from "../utils/rating";
 import { formatLrdPrice } from "../utils/currency";
@@ -19,11 +19,13 @@ const getProviderLocation = (service) =>
 
 const BookingPage = () => {
   const { id } = useParams();
+  const { state } = useLocation();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
-  const [service, setService] = useState(null);
+  const initialService = state?.service || null;
+  const [service, setService] = useState(initialService);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(() => !initialService);
   const [error, setError] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -49,17 +51,17 @@ const BookingPage = () => {
   useEffect(() => {
     const fetchService = async () => {
       if (!id) return;
-      setIsLoading(true);
+      if (!initialService) setIsLoading(true);
       setError("");
       try {
         const [serviceData, reviews] = await Promise.all([
           getServiceById(id),
           getReviewsByService(id)
         ]);
-        setService(serviceData || null);
+        setService((prev) => serviceData || prev || null);
         setReviewCount(Array.isArray(reviews) ? reviews.length : 0);
       } catch (err) {
-        setService(null);
+        setService((prev) => prev || null);
         setError(err?.message || "Unable to load service details for this booking.");
       } finally {
         setIsLoading(false);
@@ -67,7 +69,7 @@ const BookingPage = () => {
     };
 
     fetchService();
-  }, [id]);
+  }, [id, initialService]);
 
   const handleBooking = async () => {
     if (!id || !user || !service) {
@@ -120,7 +122,11 @@ const BookingPage = () => {
         ) : !service ? (
           <div className="booking-error-block">
             {error || "Service not found."}
-            <button type="button" className="booking-back-btn" onClick={() => navigate("/services")}>
+            <button
+              type="button"
+              className="booking-back-btn"
+              onClick={() => navigate(state?.from === "user-dashboard" ? "/user" : "/services")}
+            >
               Back to services
             </button>
           </div>

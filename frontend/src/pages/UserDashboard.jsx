@@ -9,6 +9,7 @@ import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
 import { getEntityId, getLiveProviderPhoto, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
+import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
 const UserDashboard = () => {
   const navigate = useNavigate();
@@ -279,10 +280,35 @@ const UserDashboard = () => {
 
   useEffect(() => {
     if (activeView !== "profile") return;
+    if (!user?.uid) {
+      setProfileData(null);
+      setProfileLoading(false);
+      return;
+    }
 
-    setProfileData(user || {});
-    setProfileError("");
-    setProfileLoading(false);
+    let cancelled = false;
+
+    const loadCurrentProfile = async () => {
+      setProfileLoading(true);
+      setProfileError("");
+      try {
+        const profile = await getUserProfile(user.uid, { forceFresh: true, ttlMs: 0 });
+        if (cancelled) return;
+        setProfileData(profile ? { ...profile, uid: user.uid } : { ...user });
+      } catch (err) {
+        if (cancelled) return;
+        setProfileData({ ...user });
+        setProfileError(err?.message || "Failed to load your profile.");
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    };
+
+    loadCurrentProfile();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeView, user]);
 
   useEffect(() => {
@@ -527,13 +553,17 @@ const UserDashboard = () => {
                                   type="button"
                                   className="sc-card__btn sc-card__btn--secondary"
                                   onClick={() => navigate(`/services/${service._id}`, { state: { service } })}
+                                  onMouseEnter={() => preloadServiceDetailsRoute(service._id)}
+                                  onFocus={() => preloadServiceDetailsRoute(service._id)}
                                 >
                                   View details
                                 </button>
                                 <button
                                   type="button"
                                   className="sc-card__btn sc-card__btn--primary"
-                                  onClick={() => navigate(`/book/${service._id}`)}
+                                  onClick={() => navigate(`/book/${service._id}`, { state: { service, from: "user-dashboard" } })}
+                                  onMouseEnter={() => preloadBookingRoute(service._id)}
+                                  onFocus={() => preloadBookingRoute(service._id)}
                                   disabled={!isAvailable}
                                 >
                                   Book Now
@@ -657,7 +687,7 @@ const UserDashboard = () => {
                     <button
                       type="button"
                       className="service-card-btn"
-                      onClick={() => navigate(`/book/${selectedService._id}`)}
+                      onClick={() => navigate(`/book/${selectedService._id}`, { state: { service: selectedService, from: "user-dashboard" } })}
                     >
                       Book Now
                     </button>

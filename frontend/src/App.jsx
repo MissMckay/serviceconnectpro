@@ -5,21 +5,37 @@ import "./App.css";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
+import {
+  loadAdminDashboardPage,
+  loadAdminLoginPage,
+  loadAuthPage,
+  loadBookingPage,
+  loadForgotPasswordPage,
+  loadLoginPage,
+  loadMessagesLayout,
+  loadProviderDashboardPage,
+  loadRegisterAdminPage,
+  loadReviewPage,
+  loadServiceDetailsPage,
+  loadServiceListingPage,
+  loadUserBookingsPage,
+  loadUserDashboardPage,
+} from "./utils/routePreload";
 
-const AuthPage = lazy(() => import("./pages/AuthPage"));
-const Login = lazy(() => import("./pages/Login"));
-const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
-const RegisterAdmin = lazy(() => import("./pages/RegisterAdmin"));
-const AdminLoginPage = lazy(() => import("./pages/AdminLoginPage"));
-const ServiceListing = lazy(() => import("./pages/ServiceListing"));
-const ServiceDetails = lazy(() => import("./pages/ServiceDetails"));
-const BookingPage = lazy(() => import("./pages/BookingPage"));
-const ReviewPage = lazy(() => import("./pages/ReviewPage"));
-const ProviderDashboard = lazy(() => import("./pages/ProviderDashboard"));
-const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
-const UserDashboard = lazy(() => import("./pages/UserDashboard"));
-const UserBookings = lazy(() => import("./pages/UserBookings"));
-const MessagesLayout = lazy(() => import("./components/MessagesLayout"));
+const AuthPage = lazy(loadAuthPage);
+const Login = lazy(loadLoginPage);
+const ForgotPassword = lazy(loadForgotPasswordPage);
+const RegisterAdmin = lazy(loadRegisterAdminPage);
+const AdminLoginPage = lazy(loadAdminLoginPage);
+const ServiceListing = lazy(loadServiceListingPage);
+const ServiceDetails = lazy(loadServiceDetailsPage);
+const BookingPage = lazy(loadBookingPage);
+const ReviewPage = lazy(loadReviewPage);
+const ProviderDashboard = lazy(loadProviderDashboardPage);
+const AdminDashboard = lazy(loadAdminDashboardPage);
+const UserDashboard = lazy(loadUserDashboardPage);
+const UserBookings = lazy(loadUserBookingsPage);
+const MessagesLayout = lazy(loadMessagesLayout);
 
 const RouteFallback = () => (
   <div className="route-loading-shell" role="status" aria-live="polite">

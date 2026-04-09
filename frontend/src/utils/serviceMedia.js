@@ -35,6 +35,60 @@ const getDescriptionValue = (entry) =>
   entry?.altText ||
   "";
 
+const getProviderPhotoCandidates = (service) =>
+  [
+    service?.providerProfilePhoto,
+    service?.providerId?.profilePhoto,
+    service?.provider?.profilePhoto,
+    service?.createdBy?.profilePhoto,
+  ]
+    .map((value) => normalizeUrl(value))
+    .filter(Boolean);
+
+const pickServiceThumbnail = (service) => {
+  const providerPhotoCandidates = new Set(getProviderPhotoCandidates(service));
+  const imageEntries = Array.isArray(service?.images) ? service.images : [];
+
+  for (const entry of imageEntries) {
+    if (!entry || typeof entry !== "object") continue;
+
+    const normalizedThumb = normalizeUrl(entry.thumbnailUrl || entry.thumbUrl || "");
+    if (normalizedThumb && !providerPhotoCandidates.has(normalizedThumb)) {
+      return normalizedThumb;
+    }
+  }
+
+  const normalizedStoredThumb = normalizeUrl(service?.thumbnailUrl || "");
+  if (normalizedStoredThumb && !providerPhotoCandidates.has(normalizedStoredThumb)) {
+    return normalizedStoredThumb;
+  }
+
+  for (const entry of imageEntries) {
+    if (typeof entry === "string") {
+      const normalizedImage = normalizeUrl(entry);
+      if (normalizedImage && !providerPhotoCandidates.has(normalizedImage)) {
+        return normalizedImage;
+      }
+      continue;
+    }
+
+    const normalizedImage = normalizeUrl(
+      entry?.imageUrl ||
+        entry?.url ||
+        entry?.image ||
+        entry?.src ||
+        entry?.path ||
+        entry?.imageURL ||
+        entry?.fileUrl
+    );
+    if (normalizedImage && !providerPhotoCandidates.has(normalizedImage)) {
+      return normalizedImage;
+    }
+  }
+
+  return "";
+};
+
 export const getServiceMedia = (service) => {
   const items = [];
 
@@ -109,7 +163,14 @@ export const getServiceMedia = (service) => {
     });
   });
 
-  [service?.image, service?.serviceImage, service?.thumbnail, service?.photo].forEach(
+  [
+    service?.images?.[0]?.thumbnailUrl,
+    service?.thumbnailUrl,
+    service?.image,
+    service?.serviceImage,
+    service?.thumbnail,
+    service?.photo,
+  ].forEach(
     (single) => pushMedia(items, single, "")
   );
 
@@ -122,7 +183,7 @@ export const getServiceMedia = (service) => {
     deduped.push(item);
   });
 
-  return deduped.slice(0, 10);
+  return deduped.slice(0, 7);
 };
 
 export const getServiceImageUrls = (service, max = 10) =>
@@ -132,25 +193,16 @@ export const getServiceImageUrls = (service, max = 10) =>
 
 /** First image URL for card display. Uses thumbnailUrl first (saved on create/update), then images[0], then getServiceMedia. */
 export function getFirstServiceImageUrl(service) {
-  const thumb = service?.thumbnailUrl ?? service?.firstImageUrl ?? service?.serviceImage ?? service?.thumbnail ?? service?.image ?? service?.photo;
-  if (thumb && typeof thumb === "string" && thumb.trim()) return normalizeUrl(thumb.trim()) || thumb.trim();
+  const prioritizedThumbnail = pickServiceThumbnail(service);
+  if (prioritizedThumbnail) return prioritizedThumbnail;
 
-  const images = service?.images;
-  if (Array.isArray(images) && images.length > 0) {
-    const first = images[0];
-    if (first && typeof first === "object") {
-      const raw =
-        first.imageUrl ??
-        first.url ??
-        first.image ??
-        first.src ??
-        first.path ??
-        first.imageURL ??
-        first.fileUrl;
-      if (raw && typeof raw === "string" && raw.trim()) return normalizeUrl(raw.trim()) || raw.trim();
-    }
-    if (typeof first === "string" && first.trim()) return normalizeUrl(first) || first;
-  }
+  const thumb =
+    service?.firstImageUrl ||
+    service?.serviceImage ||
+    service?.thumbnail ||
+    service?.image ||
+    service?.photo;
+  if (thumb && typeof thumb === "string" && thumb.trim()) return normalizeUrl(thumb.trim()) || thumb.trim();
 
   const media = getServiceMedia(service);
   if (media.length > 0 && media[0]?.url) return media[0].url;

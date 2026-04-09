@@ -16,6 +16,7 @@ const getSectionFromSearch = (search) => {
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 const getUserId = (user) => user?._id || user?.id || user?.uid || "";
 const getSelectedUserIdFromSearch = (search) => new URLSearchParams(search).get("userId") || "";
+const getSelectedServiceIdFromSearch = (search) => new URLSearchParams(search).get("serviceId") || "";
 
 const formatDate = (value) => {
   if (!value) return "N/A";
@@ -64,14 +65,17 @@ const extractMeta = (response) => {
   };
 };
 
-const getProviderFromService = (service) => {
+const getProviderFromService = (service, providerProfiles = {}) => {
   const provider = service?.providerId || service?.provider || service?.createdBy || {};
+  const providerId = provider?._id || provider?.id || service?.providerId?._id || service?.providerId || "";
+  const hydratedProvider = providerId ? providerProfiles[String(providerId)] || {} : {};
   return {
-    id: provider?._id || provider?.id || service?.providerId?._id || service?.providerId || "",
-    name: provider?.name || service?.providerName || "N/A",
-    phone: provider?.phone || service?.providerPhone || "N/A",
+    id: providerId,
+    name: provider?.name || hydratedProvider?.name || service?.providerName || "N/A",
+    phone: provider?.phone || hydratedProvider?.phone || service?.providerPhone || "N/A",
     address:
       provider?.providerAddress ||
+      hydratedProvider?.providerAddress ||
       provider?.address ||
       provider?.location ||
       service?.providerAddress ||
@@ -99,6 +103,7 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const lastOpenedUserIdRef = useRef("");
+  const selectedServiceRowRef = useRef(null);
 
   const [activeSection, setActiveSection] = useState(() => getSectionFromSearch(location.search));
   const [adminInviteCodes, setAdminInviteCodes] = useState([]);
@@ -172,6 +177,47 @@ const AdminDashboard = () => {
   }, [activeSection, detailsModal.open, location.search, users]);
 
   useEffect(() => {
+    const selectedServiceId = getSelectedServiceIdFromSearch(location.search);
+    if (!selectedServiceId || activeSection !== "services") return;
+
+    const allKnownServices = [...overviewServices, ...services];
+    const selectedService = allKnownServices.find(
+      (entry) => String(entry?._id || entry?.id) === String(selectedServiceId)
+    );
+
+    if (!selectedService) return;
+
+    const shouldResetFilters =
+      normalizeText(serviceFilters.search) !== normalizeText(selectedService?.serviceName) ||
+      serviceFilters.category !== "all" ||
+      serviceFilters.providerId !== "" ||
+      serviceFilters.status !== "all" ||
+      serviceFilters.page !== 1;
+
+    if (shouldResetFilters) {
+      setServiceFilters((prev) => ({
+        ...prev,
+        search: selectedService?.serviceName || "",
+        category: "all",
+        providerId: "",
+        status: "all",
+        page: 1,
+      }));
+    }
+  }, [activeSection, location.search, overviewServices, serviceFilters.category, serviceFilters.page, serviceFilters.providerId, serviceFilters.search, serviceFilters.status, services]);
+
+  useEffect(() => {
+    const selectedServiceId = getSelectedServiceIdFromSearch(location.search);
+    if (!selectedServiceId || activeSection !== "services" || isServicesLoading) return;
+
+    const timer = setTimeout(() => {
+      selectedServiceRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [activeSection, isServicesLoading, location.search, services]);
+
+  useEffect(() => {
     if (!toast.message) return undefined;
     const timer = setTimeout(() => {
       setToast({ type: "", message: "" });
@@ -218,7 +264,13 @@ const AdminDashboard = () => {
       const matchingService = combinedServices.find(
         (service) => getServiceProviderId(service) === providerId
       );
-      return !(matchingService && serviceHasProviderSummary(matchingService));
+      const hydratedProfile = serviceProviderProfiles[String(providerId)];
+      const hasPhone =
+        Boolean(matchingService?.providerPhone) ||
+        Boolean(matchingService?.providerId?.phone) ||
+        Boolean(matchingService?.provider?.phone) ||
+        Boolean(hydratedProfile?.phone);
+      return !(matchingService && serviceHasProviderSummary(matchingService) && hasPhone);
     });
 
     if (!providersNeedingHydration.length) {
@@ -292,8 +344,7 @@ const AdminDashboard = () => {
 
     try {
       const response = await getFirstSuccessfulGet([
-        { path: "/admin/users", config: { params } },
-        { path: "/auth/users" }
+        { path: "/admin/users", config: { params } }
       ]);
 
       if (!response) {
@@ -378,10 +429,6 @@ const AdminDashboard = () => {
       setIsServicesLoading(false);
     }
   };
-
-  useEffect(() => {
-    refreshServices();
-  }, []);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -790,7 +837,12 @@ const AdminDashboard = () => {
   const navigateToServiceDetails = (service) => {
     const serviceId = service?._id || service?.id;
     if (!serviceId) return;
-    navigate(`/services/${serviceId}`, { state: { service } });
+
+    const params = new URLSearchParams(location.search);
+    params.set("view", "services");
+    params.set("serviceId", serviceId);
+    const queryString = params.toString();
+    navigate(queryString ? `/admin?${queryString}` : "/admin");
   };
 
   const removeService = async (service) => {
@@ -1063,14 +1115,20 @@ const AdminDashboard = () => {
                           <tr><td colSpan="10" className="admin-empty-row">No services found.</td></tr>
                         ) : services.map((service) => {
                           const serviceId = service?._id || service?.id;
-                          const provider = getProviderFromService(service);
+                          const provider = getProviderFromService(service, serviceProviderProfiles);
                           const imageCount = getServiceMedia(service).length;
+                          const isSelectedService =
+                            String(serviceId) === String(getSelectedServiceIdFromSearch(location.search));
                           return (
-                            <tr key={serviceId}>
-                              <td>{service?.serviceName || "N/A"}</td><td><span className="admin-provider-chip">{getServiceProviderPhoto(service) ? <img src={getServiceProviderPhoto(service)} alt={provider.name} className="admin-provider-chip-avatar" /> : <span className="admin-provider-chip-fallback">{String(provider.name || "?").trim().slice(0, 2).toUpperCase()}</span>}<span>{provider.name}</span></span></td><td>{provider.phone}</td><td>{provider.address}</td><td>{service?.category || "N/A"}</td><td>{Number.isFinite(Number(service?.price)) ? `$${Number(service.price).toLocaleString("en-US")}` : "N/A"}</td><td>{formatDate(service?.createdAt)}</td><td>{service?.availabilityStatus || "N/A"}</td><td>{imageCount}</td>
+                            <tr
+                              key={serviceId}
+                              ref={isSelectedService ? selectedServiceRowRef : null}
+                              className={isSelectedService ? "admin-row-selected" : ""}
+                            >
+                              <td>{service?.serviceName || "N/A"}</td><td><span className="admin-provider-chip">{getServiceProviderPhoto(service) ? <img src={getServiceProviderPhoto(service)} alt={provider.name} className="admin-provider-chip-avatar" /> : <span className="admin-provider-chip-fallback">{String(provider.name || "?").trim().slice(0, 2).toUpperCase()}</span>}<span>{provider.name}</span></span></td><td>{provider.phone || "N/A"}</td><td>{provider.address}</td><td>{service?.category || "N/A"}</td><td>{Number.isFinite(Number(service?.price)) ? `$${Number(service.price).toLocaleString("en-US")}` : "N/A"}</td><td>{formatDate(service?.createdAt)}</td><td>{service?.availabilityStatus || "N/A"}</td><td>{imageCount}</td>
                               <td>
                                 <div className="admin-inline-actions">
-                                  <button type="button" className="admin-action-btn" onClick={() => navigate(`/services/${serviceId}`)}>View</button>
+                                  <button type="button" className="admin-action-btn" onClick={() => navigateToServiceDetails(service)}>View</button>
                                   <button type="button" className="admin-action-btn remove-btn" onClick={() => removeService(service)} disabled={busyActionId === `${serviceId}-remove`}>Remove Service</button>
                                   <button type="button" className="admin-action-btn suspend-btn" onClick={() => suspendProviderFromService(service)}>Suspend Provider</button>
                                 </div>

@@ -21,6 +21,7 @@ const serviceSchema = new mongoose.Schema(
     images: [
       {
         imageUrl: { type: String, required: true },
+        thumbnailUrl: { type: String, default: "" },
         caption: { type: String, default: "" },
       },
     ],
@@ -36,12 +37,12 @@ const serviceSchema = new mongoose.Schema(
 );
 
 serviceSchema.path("images").validate(function (value) {
-  return !Array.isArray(value) || value.length <= 10;
-}, "Maximum 10 images are allowed");
+  return !Array.isArray(value) || value.length <= 7;
+}, "Maximum 7 images are allowed");
 
 serviceSchema.index({ moderationStatus: 1, createdAt: -1 });
-serviceSchema.index({ category: 1, moderationStatus: 1 });
-serviceSchema.index({ price: 1, moderationStatus: 1 });
-serviceSchema.index({ providerId: 1 });
+serviceSchema.index({ moderationStatus: 1, category: 1, createdAt: -1 });
+serviceSchema.index({ moderationStatus: 1, providerId: 1, createdAt: -1 });
+serviceSchema.index({ moderationStatus: 1, price: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Service", serviceSchema);

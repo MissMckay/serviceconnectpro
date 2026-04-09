@@ -9,6 +9,7 @@ import {
   updateService as updateServiceFirestore,
   deleteService as deleteServiceFirestore,
   updateUserProfile,
+  getServiceById,
 } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { canProviderCreateServices, getProviderAccessMessage } from "../utils/providerAccess";
@@ -63,7 +64,12 @@ const serviceCategoryOptions = [
   "Delivery Services"
 ];
 
-const MAX_MEDIA_PAYLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_SERVICE_IMAGE_COUNT = 7;
+const MAX_MEDIA_PAYLOAD_BYTES = 1650 * 1024;
+const MAX_PROFILE_PHOTO_BYTES = 180 * 1024;
+const MAX_SERVICE_IMAGE_BYTES = 280 * 1024;
+const MAX_SERVICE_THUMBNAIL_BYTES = 55 * 1024;
+const MAX_PROVIDER_PHOTO_DIMENSION = 160;
 
 const getDataArray = (res) =>
   Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : [];
@@ -96,6 +102,148 @@ const getApproxPayloadBytes = (value) => {
   }
 };
 
+const compressCanvasToDataUrl = (canvas, maxBytes, initialQuality = 0.82) => {
+  let quality = initialQuality;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+  while (getApproxPayloadBytes(dataUrl) > maxBytes && quality > 0.4) {
+    quality -= 0.08;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+
+  return dataUrl;
+};
+
+const loadImageFromFile = (file) =>
+  new Promise((resolve, reject) => {
+    const imageUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(imageUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl);
+      reject(new Error(`Unable to read file ${file.name}`));
+    };
+    image.src = imageUrl;
+  });
+
+const compressProfilePhoto = async (file) => {
+  const image = await loadImageFromFile(file);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to process the selected image.");
+
+  const scale = Math.min(1, MAX_PROVIDER_PHOTO_DIMENSION / Math.max(image.width, image.height));
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  let quality = 0.82;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+  while (getApproxPayloadBytes(dataUrl) > MAX_PROFILE_PHOTO_BYTES && quality > 0.45) {
+    quality -= 0.12;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+
+  if (getApproxPayloadBytes(dataUrl) > MAX_PROFILE_PHOTO_BYTES) {
+    throw new Error("Profile photo is too large. Please choose a smaller image.");
+  }
+
+  return dataUrl;
+};
+
+const buildScaledCanvas = (image, maxDimension) => {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to process the selected image.");
+  const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas;
+};
+
+const buildCoverCanvas = (image, width, height) => {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to process the selected image.");
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const scale = Math.max(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (width - drawWidth) / 2;
+  const offsetY = (height - drawHeight) / 2;
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+  return canvas;
+};
+
+const compressServiceImage = async (file) => {
+  const image = await loadImageFromFile(file);
+  const fullCanvas = buildScaledCanvas(image, 1440);
+  const thumbnailCanvas = buildCoverCanvas(image, 360, 260);
+
+  const url = compressCanvasToDataUrl(fullCanvas, MAX_SERVICE_IMAGE_BYTES, 0.84);
+  const thumbnailUrl = compressCanvasToDataUrl(thumbnailCanvas, MAX_SERVICE_THUMBNAIL_BYTES, 0.78);
+
+  if (
+    getApproxPayloadBytes(url) > MAX_SERVICE_IMAGE_BYTES ||
+    getApproxPayloadBytes(thumbnailUrl) > MAX_SERVICE_THUMBNAIL_BYTES
+  ) {
+    throw new Error(`Image ${file.name} is too large. Please choose a smaller image.`);
+  }
+
+  return {
+    url,
+    thumbnailUrl,
+    description: "",
+    name: file.name,
+  };
+};
+
+const getServiceImageEntries = (service) => {
+  if (Array.isArray(service?.images) && service.images.length) {
+    return service.images
+      .map((entry, index) => {
+        if (typeof entry === "string") {
+          return {
+            url: entry,
+            thumbnailUrl: index === 0 ? service?.thumbnailUrl || "" : "",
+            description: "",
+            name: "",
+          };
+        }
+
+        const url = String(entry?.imageUrl || entry?.url || "").trim();
+        if (!url) return null;
+
+        return {
+          url,
+          thumbnailUrl: String(entry?.thumbnailUrl || (index === 0 ? service?.thumbnailUrl || "" : "")).trim(),
+          description: String(entry?.caption || entry?.description || "").trim(),
+          name: "",
+        };
+      })
+      .filter(Boolean)
+      .slice(0, MAX_SERVICE_IMAGE_COUNT);
+  }
+
+  return getServiceMedia(service)
+    .slice(0, MAX_SERVICE_IMAGE_COUNT)
+    .map((entry, index) => ({
+      url: entry.url,
+      thumbnailUrl: index === 0 ? String(service?.thumbnailUrl || "").trim() : "",
+      description: entry.description || "",
+      name: "",
+    }));
+};
+
 const ProviderDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -104,7 +252,10 @@ const ProviderDashboard = () => {
   const [bookings, setBookings] = useState([]);
   const [services, setServices] = useState([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [isPreparingEdit, setIsPreparingEdit] = useState(false);
+  const [preparingEditId, setPreparingEditId] = useState("");
   const [editingServiceId, setEditingServiceId] = useState("");
+  const [initialEditImagesSignature, setInitialEditImagesSignature] = useState("");
   const [feedback, setFeedback] = useState({ type: "", message: "" });
   const getSectionFromSearch = (search) => {
     const view = new URLSearchParams(search).get("view");
@@ -138,19 +289,7 @@ const ProviderDashboard = () => {
   };
 
   const syncProviderPhotoAcrossServices = async (profilePhoto) => {
-    const role = String(providerProfile?.role || user?.role || "").toLowerCase();
-    if (role !== "provider") return;
-
-    const providerId = getCurrentProviderId();
-    const ownedServices = services.filter((service) => belongsToCurrentProvider(service, providerId));
-    if (!ownedServices.length) return;
-
-    await Promise.all(
-      ownedServices.map((service) =>
-        updateServiceFirestore(service._id, { providerProfilePhoto: profilePhoto || "" })
-      )
-    );
-    notifyServicesUpdated();
+    return;
   };
 
   useEffect(() => {
@@ -215,7 +354,7 @@ const ProviderDashboard = () => {
       return;
     }
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressProfilePhoto(file);
       if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: dataUrl });
       await syncProviderPhotoAcrossServices(dataUrl);
       await refreshProfile();
@@ -247,7 +386,8 @@ const ProviderDashboard = () => {
       const payload = { name: name || providerProfile?.name, phone: phone || "Not provided", providerAddress: providerAddress || "Not provided" };
       if (user?.uid) await updateUserProfile(user.uid, payload);
       await refreshProfile();
-      showSuccess("Settings saved.");
+      notifyServicesUpdated();
+      showSuccess("Settings saved successfully.");
     } catch (err) {
       showError(err?.message || "Failed to save settings.");
     } finally {
@@ -259,9 +399,9 @@ const ProviderDashboard = () => {
     const incomingFiles = Array.from(event.target.files || []);
     if (!incomingFiles.length) return;
 
-    const remainingSlots = Math.max(0, 10 - serviceForm.imageDetails.length);
+    const remainingSlots = Math.max(0, MAX_SERVICE_IMAGE_COUNT - serviceForm.imageDetails.length);
     if (remainingSlots <= 0) {
-      showError("You can upload up to 10 images.");
+      showError(`You can upload up to ${MAX_SERVICE_IMAGE_COUNT} images.`);
       event.target.value = "";
       return;
     }
@@ -269,11 +409,7 @@ const ProviderDashboard = () => {
     const filesToUpload = incomingFiles.slice(0, remainingSlots);
     const skippedCount = Math.max(0, incomingFiles.length - filesToUpload.length);
     const results = await Promise.allSettled(
-      filesToUpload.map(async (file) => ({
-        url: await readFileAsDataUrl(file),
-        description: "",
-        name: file.name
-      }))
+      filesToUpload.map((file) => compressServiceImage(file))
     );
 
     const uploaded = results
@@ -286,9 +422,16 @@ const ProviderDashboard = () => {
       .filter(Boolean);
 
     if (uploaded.length) {
+      const nextImageDetails = [...serviceForm.imageDetails, ...uploaded].slice(0, MAX_SERVICE_IMAGE_COUNT);
+      if (getApproxPayloadBytes(nextImageDetails) > MAX_MEDIA_PAYLOAD_BYTES) {
+        showError("These images are still too large together. Please add fewer or smaller images.");
+        event.target.value = "";
+        return;
+      }
+
       setServiceForm((prev) => ({
         ...prev,
-        imageDetails: [...prev.imageDetails, ...uploaded].slice(0, 10)
+        imageDetails: nextImageDetails
       }));
     }
 
@@ -296,7 +439,7 @@ const ProviderDashboard = () => {
       const failuresText = failedNames.length
         ? ` Failed to read: ${failedNames.join(", ")}.`
         : "";
-      const skippedText = skippedCount > 0 ? ` ${skippedCount} file(s) were skipped due to the 10-image limit.` : "";
+      const skippedText = skippedCount > 0 ? ` ${skippedCount} file(s) were skipped due to the ${MAX_SERVICE_IMAGE_COUNT}-image limit.` : "";
       showError(`Some files were not added.${failuresText}${skippedText}`);
     } else {
       showSuccess(`${uploaded.length} image(s) added.`);
@@ -313,6 +456,39 @@ const ProviderDashboard = () => {
         imageDetails: nextItems
       };
     });
+  };
+
+  const replaceMediaRow = async (index, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const nextEntry = await compressServiceImage(file);
+      const nextItems = serviceForm.imageDetails.map((entry, entryIndex) =>
+        entryIndex === index
+          ? {
+              ...entry,
+              url: nextEntry.url,
+              thumbnailUrl: nextEntry.thumbnailUrl,
+              name: file.name || entry.name || "",
+            }
+          : entry
+      );
+
+      if (getApproxPayloadBytes(nextItems) > MAX_MEDIA_PAYLOAD_BYTES) {
+        throw new Error("This replacement image is still too large. Please choose a smaller image.");
+      }
+
+      setServiceForm((prev) => ({
+        ...prev,
+        imageDetails: nextItems,
+      }));
+      showSuccess(`Image ${index + 1} replaced.`);
+    } catch (err) {
+      showError(err?.message || "Unable to replace this image.");
+    }
+
+    event.target.value = "";
   };
 
   const updateStatus = async (id, status) => {
@@ -342,45 +518,51 @@ const ProviderDashboard = () => {
     const providerName = String(providerProfile?.name || "").trim();
     const providerAddress = String(providerProfile?.providerAddress || "").trim();
 
-    // Build images as plain data-URL entries (no Firebase Storage).
-    const normalizedMedia = (serviceForm.imageDetails || [])
-      .map((entry) => ({
-        url: String(entry?.url || "").trim(),
-        description: String(entry?.description || "").trim()
-      }))
-      .filter((entry) => entry.url)
-      .slice(0, 10);
+      // Build images as plain data-URL entries (no Firebase Storage).
+      const normalizedMedia = (serviceForm.imageDetails || [])
+        .map((entry) => ({
+          url: String(entry?.url || "").trim(),
+          thumbnailUrl: String(entry?.thumbnailUrl || "").trim(),
+          description: String(entry?.description || "").trim()
+        }))
+        .filter((entry) => entry.url)
+        .slice(0, MAX_SERVICE_IMAGE_COUNT);
 
     const images = normalizedMedia.map((m) => ({
       imageUrl: m.url,
+      thumbnailUrl: m.thumbnailUrl || "",
       caption: m.description || ""
     }));
+    const currentImagesSignature = JSON.stringify(images);
 
     setIsCreating(true);
     try {
       if (editingServiceId) {
-        await updateServiceFirestore(editingServiceId, {
-          serviceName: serviceForm.serviceName,
-          category: serviceForm.category,
-          description: serviceForm.description,
-          price: Number(serviceForm.price) || 0,
-          availabilityStatus: serviceForm.availabilityStatus || "Available",
-          images,
-          providerProfilePhoto: providerProfile?.profilePhoto || "",
-        });
-        showSuccess("Service updated successfully.");
-      } else {
+          const updatePayload = {
+            serviceName: serviceForm.serviceName,
+            category: serviceForm.category,
+            description: serviceForm.description,
+            price: Number(serviceForm.price) || 0,
+            availabilityStatus: serviceForm.availabilityStatus || "Available",
+          };
+          if (currentImagesSignature !== initialEditImagesSignature) {
+            updatePayload.images = images;
+          }
+          await updateServiceFirestore(editingServiceId, {
+            ...updatePayload,
+          });
+          showSuccess("Service updated successfully.");
+        } else {
         const result = await createServiceFirestore(providerId, {
           serviceName: serviceForm.serviceName,
           category: serviceForm.category,
           description: serviceForm.description,
           price: Number(serviceForm.price) || 0,
-          availabilityStatus: serviceForm.availabilityStatus || "Available",
-          images,
-          providerName,
-          providerAddress,
-          providerProfilePhoto: providerProfile?.profilePhoto || "",
-        });
+            availabilityStatus: serviceForm.availabilityStatus || "Available",
+            images,
+            providerName,
+            providerAddress,
+          });
         const skipped = result && typeof result === "object" && result.imagesSkipped;
         showSuccess(
           skipped
@@ -390,6 +572,7 @@ const ProviderDashboard = () => {
       }
       setServiceForm({ ...defaultFormState });
       setEditingServiceId("");
+      setInitialEditImagesSignature("");
       notifyServicesUpdated();
       navigate("/provider?view=manage");
     } catch (err) {
@@ -405,38 +588,60 @@ const ProviderDashboard = () => {
     }
   };
 
-  const startEditService = (service) => {
+  const startEditService = async (service) => {
     const providerId = getCurrentProviderId();
     if (!belongsToCurrentProvider(service, providerId)) {
       showError("You can only edit services created by your account.");
       return;
     }
 
-    const media = getServiceMedia(service).map((entry) => ({
-      url: entry.url,
-      description: entry.description || "",
-      name: ""
-    }));
+    setIsPreparingEdit(true);
+    setPreparingEditId(String(service?._id || ""));
+    try {
+      const freshService = await getServiceById(String(service?._id || ""), {
+        forceFresh: true,
+      });
+      const sourceService = freshService || service;
+      const media = getServiceImageEntries(sourceService);
+      const nextImagesSignature = JSON.stringify(
+        media.slice(0, MAX_SERVICE_IMAGE_COUNT).map((entry) => ({
+          imageUrl: String(entry?.url || "").trim(),
+          thumbnailUrl: String(entry?.thumbnailUrl || "").trim(),
+          caption: String(entry?.description || "").trim(),
+        }))
+      );
 
-    setEditingServiceId(String(service?._id || ""));
-    setServiceForm({
-      serviceName: service?.serviceName || "",
-      category: service?.category || "",
-      description: service?.description || "",
-      price: service?.price ?? "",
-      availabilityStatus: service?.availabilityStatus || "Available",
-      imageDetails: media.slice(0, 10)
-    });
+      setEditingServiceId(String(sourceService?._id || service?._id || ""));
+      setInitialEditImagesSignature(nextImagesSignature);
+      setServiceForm({
+        serviceName: sourceService?.serviceName || "",
+        category: sourceService?.category || "",
+        description: sourceService?.description || "",
+        price: sourceService?.price ?? "",
+        availabilityStatus: sourceService?.availabilityStatus || "Available",
+        imageDetails: media.slice(0, MAX_SERVICE_IMAGE_COUNT),
+      });
 
-    navigate("/provider?view=add");
-    showSuccess("Service loaded for editing.");
+      navigate("/provider?view=add");
+      showSuccess("Service loaded for editing.");
+    } catch (err) {
+      showError(err?.message || "Unable to load this service for editing.");
+    } finally {
+      setIsPreparingEdit(false);
+      setPreparingEditId("");
+    }
   };
 
-  const clearEditMode = () => {
+  const clearEditMode = (options = {}) => {
     setEditingServiceId("");
+    setInitialEditImagesSignature("");
     setServiceForm({
       ...defaultFormState
     });
+
+    if (options.navigateToManage) {
+      navigate("/provider?view=manage");
+    }
   };
 
   const deleteService = async (serviceId) => {
@@ -450,7 +655,7 @@ const ProviderDashboard = () => {
     try {
       await deleteServiceFirestore(serviceId);
       notifyServicesUpdated();
-      if (String(editingServiceId) === String(serviceId)) clearEditMode();
+      if (String(editingServiceId) === String(serviceId)) clearEditMode({ navigateToManage: true });
       showSuccess("Service deleted successfully.");
     } catch (err) {
       showError(err?.message || "Unable to delete service.");
@@ -576,38 +781,38 @@ const ProviderDashboard = () => {
           <div className="dashboard-panel provider-dashboard-overview">
             <article className="provider-section-card">
               <h2 className="provider-card-heading">My Dashboard</h2>
-              <p className="provider-dashboard-subtitle">Live overview of your services and bookings</p>
+              <p className="provider-dashboard-subtitle">Live overview of your services and booking requests</p>
 
               <div className="provider-dashboard-metrics admin-report-strip">
-                <div className="admin-metric provider-metric">
+                <button type="button" className="admin-metric provider-metric provider-metric-button" onClick={() => navigate("/provider?view=manage")}>
                   <p>My Services</p>
                   <strong>{dashboardStats.totalServices}</strong>
-                </div>
-                <div className="admin-metric provider-metric">
-                  <p>Total Bookings</p>
+                </button>
+                <button type="button" className="admin-metric provider-metric provider-metric-button" onClick={() => navigate("/provider?view=bookings")}>
+                  <p>Total Requests</p>
                   <strong>{dashboardStats.totalBookings}</strong>
-                </div>
-                <div className="admin-metric provider-metric">
+                </button>
+                <button type="button" className="admin-metric provider-metric provider-metric-button" onClick={() => navigate("/provider?view=bookings")}>
                   <p>Pending</p>
                   <strong>{dashboardStats.pending}</strong>
-                </div>
-                <div className="admin-metric provider-metric">
+                </button>
+                <button type="button" className="admin-metric provider-metric provider-metric-button" onClick={() => navigate("/provider?view=bookings")}>
                   <p>Accepted</p>
                   <strong>{dashboardStats.accepted}</strong>
-                </div>
-                <div className="admin-metric provider-metric">
+                </button>
+                <button type="button" className="admin-metric provider-metric provider-metric-button" onClick={() => navigate("/provider?view=bookings")}>
                   <p>Completed</p>
                   <strong>{dashboardStats.completed}</strong>
-                </div>
-                <div className="admin-metric provider-metric provider-metric-revenue">
+                </button>
+                <button type="button" className="admin-metric provider-metric provider-metric-revenue provider-metric-button" onClick={() => navigate("/provider?view=bookings")}>
                   <p>Revenue (Completed)</p>
                   <strong>{formatLrdPrice(dashboardStats.revenue)}</strong>
-                </div>
+                </button>
               </div>
 
               <div className="provider-dashboard-charts">
                 <div className="provider-chart-card">
-                  <h3 className="provider-chart-title">Bookings over time (last 14 days)</h3>
+                  <h3 className="provider-chart-title">Booking requests over time (last 14 days)</h3>
                   <div className="provider-chart-wrap">
                     <ResponsiveContainer width="100%" height={260}>
                       <AreaChart data={areaChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -661,7 +866,7 @@ const ProviderDashboard = () => {
               </div>
 
               <div className="provider-dashboard-table-card">
-                <h3 className="provider-chart-title">Recent bookings</h3>
+                <h3 className="provider-chart-title">Recent booking requests</h3>
                 <div className="provider-table-wrap">
                   <table className="provider-table provider-dashboard-table">
                     <thead>
@@ -678,7 +883,7 @@ const ProviderDashboard = () => {
                       {recentBookings.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="provider-table-empty">
-                            No bookings yet. New requests will appear here in real time.
+                            No booking requests yet. New requests will appear here in real time.
                           </td>
                         </tr>
                       ) : (
@@ -744,8 +949,8 @@ const ProviderDashboard = () => {
                                 onClick={() =>
                                   navigate("/messages", {
                                     state: {
-                                      recipientId: booking?.userId?._id || booking?.userId,
-                                      recipientName: booking?.userId?.name || booking?.userId?.email
+                                      recipientId: getEntityId(booking?.userId) || getEntityId(booking?.user) || "",
+                                      recipientName: booking?.userId?.name || booking?.user?.name || booking?.userId?.email || booking?.user?.email || "Customer"
                                     }
                                   })
                                 }
@@ -918,7 +1123,7 @@ const ProviderDashboard = () => {
                 </section>
 
                 <section className="provider-form-section">
-                  <h3 className="provider-form-section-title">Service images (up to 10)</h3>
+                  <h3 className="provider-form-section-title">Service images (up to 7)</h3>
                   <div className="provider-media-wrapper provider-media-pro">
                     <label className="provider-media-upload-label" htmlFor="provider-service-images">
                       <span className="provider-media-upload-text">Choose images</span>
@@ -928,11 +1133,11 @@ const ProviderDashboard = () => {
                         accept="image/*"
                         multiple
                         onChange={addSelectedImages}
-                        disabled={!canAddService || serviceForm.imageDetails.length >= 10}
+                        disabled={!canAddService || serviceForm.imageDetails.length >= MAX_SERVICE_IMAGE_COUNT}
                         aria-label="Add service images"
                       />
                     </label>
-                    <p className="provider-media-hint">JPG or PNG, max 10 images (~20MB total).</p>
+                    <p className="provider-media-hint">JPG or PNG, up to 7 images. The system creates thumbnails for the marketplace cards automatically.</p>
                     {serviceForm.imageDetails.length > 0 && (
                       <div className="provider-media-grid">
                         {serviceForm.imageDetails.map((entry, index) => (
@@ -946,6 +1151,15 @@ const ProviderDashboard = () => {
                               disabled={!canAddService}
                               className="provider-media-caption"
                             />
+                            <label className="provider-media-replace">
+                              Replace image
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => replaceMediaRow(index, e)}
+                                disabled={!canAddService}
+                              />
+                            </label>
                             <button
                               type="button"
                               className="provider-media-remove"
@@ -973,7 +1187,7 @@ const ProviderDashboard = () => {
                     <button
                       type="button"
                       className="provider-action-btn provider-edit-btn"
-                      onClick={clearEditMode}
+                      onClick={() => clearEditMode({ navigateToManage: true })}
                     >
                       Cancel edit
                     </button>
@@ -1015,8 +1229,9 @@ const ProviderDashboard = () => {
                                 type="button"
                                 className="provider-action-btn provider-edit-btn"
                                 onClick={() => startEditService(service)}
+                                disabled={isPreparingEdit}
                               >
-                                Edit
+                                {isPreparingEdit && String(preparingEditId || "") === String(service?._id || "") ? "Loading…" : "Edit"}
                               </button>
                               <button
                                 type="button"
@@ -1083,8 +1298,8 @@ const ProviderDashboard = () => {
                                   onClick={() =>
                                     navigate("/messages", {
                                       state: {
-                                        recipientId: booking.userId?._id || booking.user?._id,
-                                        recipientName: booking.userId?.name || booking.user?.name || "Customer"
+                                        recipientId: getEntityId(booking?.userId) || getEntityId(booking?.user) || "",
+                                        recipientName: booking.userId?.name || booking.user?.name || booking.userId?.email || booking.user?.email || "Customer"
                                       }
                                     })
                                   }

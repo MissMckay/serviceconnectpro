@@ -15,6 +15,10 @@ const bookingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+bookingSchema.index({ providerId: 1, createdAt: -1 });
+bookingSchema.index({ userId: 1, createdAt: -1 });
+bookingSchema.index({ serviceId: 1, createdAt: -1 });
+
 bookingSchema.set("toJSON", { versionKey: false });
 
 module.exports = mongoose.model("Booking", bookingSchema);

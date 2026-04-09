@@ -1931,6 +1931,23 @@
   font-size: 1.25rem;
 }
 
+.provider-metric-button {
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.provider-metric-button:hover {
+  transform: translateY(-1px);
+}
+
+.provider-metric-button:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
 .provider-metric-revenue strong {
   color: var(--brand-blue);
 }
@@ -2243,6 +2260,15 @@
 
 .admin-table tbody tr:hover {
   background: #f8fbff;
+}
+
+.admin-table tbody tr.admin-row-selected {
+  background: #edf3ff;
+  box-shadow: inset 4px 0 0 var(--brand-blue);
+}
+
+.admin-table tbody tr.admin-row-selected:hover {
+  background: #e4efff;
 }
 
 .selected-row {
@@ -5184,6 +5210,10 @@
   gap: 16px;
 }
 
+.services-page__title-block {
+  min-width: 0;
+}
+
 .services-summary-backdrop {
   position: fixed;
   inset: 0;
@@ -5405,7 +5435,7 @@
   top: 82px;
   z-index: 13;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
   margin-bottom: 14px;
   padding: 10px;
@@ -5414,9 +5444,12 @@
   border: 1px solid rgba(214, 222, 233, 0.95);
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
   backdrop-filter: blur(10px);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .services-toolbar__btn {
+  flex: 0 0 auto;
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -5848,7 +5881,7 @@
   }
 
   .services-toolbar__btn {
-    flex: 1 1 calc(50% - 8px);
+    flex: 0 0 auto;
     min-width: 0;
     font-size: 0.8rem;
     padding: 9px 10px;
@@ -5989,7 +6022,7 @@
   }
 
   .services-toolbar__btn {
-    flex-basis: calc(50% - 6px);
+    flex: 0 0 auto;
     font-size: 0.76rem;
     min-height: 40px;
     padding: 8px 10px;

@@ -20,6 +20,21 @@ const corsOriginPatterns = corsOriginRegex
   .filter(Boolean)
   .map((pattern) => new RegExp(pattern));
 
+const isLocalDevOrigin = (origin) => {
+  if (!origin || typeof origin !== "string") return false;
+
+  try {
+    const parsed = new URL(origin);
+    const hostname = String(parsed.hostname || "").toLowerCase();
+    return (
+      (hostname === "localhost" || hostname === "127.0.0.1") &&
+      /^https?:$/.test(parsed.protocol)
+    );
+  } catch {
+    return false;
+  }
+};
+
 const corsOptions = {
   origin(origin, callback) {
     if (!origin) {
@@ -27,7 +42,11 @@ const corsOptions = {
       return;
     }
 
-    if (corsOrigins.includes(origin) || corsOriginPatterns.some((pattern) => pattern.test(origin))) {
+    if (
+      corsOrigins.includes(origin) ||
+      corsOriginPatterns.some((pattern) => pattern.test(origin)) ||
+      isLocalDevOrigin(origin)
+    ) {
       callback(null, true);
       return;
     }
