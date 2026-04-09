@@ -161,7 +161,9 @@ const ProviderDashboard = () => {
       return;
     }
     const unsubBookings = subscribeBookingsByProvider(providerId, setBookings);
-    const unsubServices = subscribeServices({ providerId }, setServices);
+    const unsubServices = subscribeServices({ providerId }, setServices, {
+      pollMs: 0
+    });
     return () => {
       if (typeof unsubBookings === "function") unsubBookings();
       if (typeof unsubServices === "function") unsubServices();

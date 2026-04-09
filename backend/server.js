@@ -56,16 +56,91 @@ function healthHandler(req, res) {
   const mongoose = require("mongoose");
   const dbState = mongoose.connection.readyState;
   const stateNames = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
+  const connectionStatus =
+    typeof connectDB.getConnectionStatus === "function"
+      ? connectDB.getConnectionStatus()
+      : {
+          readyState: dbState,
+          connected: dbState === 1,
+          degraded: false,
+          lastConnectionIssue: null,
+        };
+  const connected = connectionStatus.connected;
 
   res.json({
-    ok: dbState === 1,
+    ok: connected,
     database: stateNames[dbState] || "unknown",
     databaseName: mongoose.connection.db?.databaseName || null,
+    meta: {
+      degraded: !connected || connectionStatus.degraded,
+      reason: connected
+        ? connectionStatus.degraded
+          ? "database_degraded"
+          : null
+        : "database_unavailable",
+      message: connected
+        ? connectionStatus.degraded
+          ? "Database is connected but unstable. Endpoints may return fallback data while it recovers."
+          : null
+        : "Database is temporarily unavailable. Endpoints may return cached or empty fallback data.",
+      readyState: connectionStatus.readyState,
+      lastConnectionIssue: connectionStatus.lastConnectionIssue,
+    },
   });
 }
 
 app.get("/api/health", healthHandler);
 app.get("/health", healthHandler);
+app.get("/api/debug/db", async (req, res) => {
+  const mongoose = require("mongoose");
+  const dbState = mongoose.connection.readyState;
+  const stateNames = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
+  const connectionStatus =
+    typeof connectDB.getConnectionStatus === "function"
+      ? connectDB.getConnectionStatus()
+      : {
+          readyState: dbState,
+          connected: dbState === 1,
+          degraded: false,
+          lastConnectionIssue: null,
+        };
+  let hello = null;
+  let helloError = null;
+
+  if (connectionStatus.connected && mongoose.connection.db) {
+    try {
+      hello = await mongoose.connection.db.admin().command({ hello: 1 });
+    } catch (error) {
+      helloError = {
+        name: error?.name || "Error",
+        message: error?.message || "Failed to run hello command",
+      };
+    }
+  }
+
+  res.json({
+    ok:
+      connectionStatus.connected &&
+      !connectionStatus.degraded &&
+      (hello?.isWritablePrimary !== false),
+    database: stateNames[dbState] || "unknown",
+    databaseName: mongoose.connection.db?.databaseName || null,
+    host: mongoose.connection.host || null,
+    meta: {
+      readyState: connectionStatus.readyState,
+      connected: connectionStatus.connected,
+      degraded: connectionStatus.degraded,
+      degradedUntil: connectionStatus.degradedUntil,
+      lastConnectionIssue: connectionStatus.lastConnectionIssue,
+      writablePrimary:
+        typeof hello?.isWritablePrimary === "boolean" ? hello.isWritablePrimary : null,
+      secondary:
+        typeof hello?.secondary === "boolean" ? hello.secondary : null,
+      setName: hello?.setName || null,
+      helloError,
+    },
+  });
+});
 
 // Routes
 const authRoutes = require("./routes/authRoutes");

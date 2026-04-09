@@ -1,13 +1,13 @@
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { getPublicServicesSnapshot, getServices, getUserProfile, subscribeBookingsByUser, updateUserProfile } from "../firebase/firestoreServices";
+import { getPublicServicesSnapshot, getUserProfile, subscribeBookingsByUser, subscribeServices, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
-import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
+import { getEntityId, getLiveProviderPhoto, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const UserDashboard = () => {
@@ -163,30 +163,36 @@ const UserDashboard = () => {
       .trim()
       .toLowerCase();
 
-  const fetchServicesForDashboard = async () => {
+  useEffect(() => {
     setIsLoading(true);
     setError("");
+
+    let unsub;
+
     try {
-      const serviceList = await getServices({
-        category: filters.category,
-        location: filters.location.trim(),
-        minPrice: "",
-        maxPrice: "",
-      });
-      setServices(serviceList);
+      unsub = subscribeServices(
+        {
+          category: filters.category,
+          location: filters.location.trim(),
+          minPrice: "",
+          maxPrice: "",
+        },
+        (serviceList) => {
+          setServices(Array.isArray(serviceList) ? serviceList : []);
+          setError("");
+          setIsLoading(false);
+        },
+        { pollMs: 0 }
+      );
     } catch (err) {
       setServices([]);
       setError(err?.message || "Failed to load services.");
-    } finally {
       setIsLoading(false);
     }
-  };
 
-  const isValidObjectId = (value) =>
-    typeof value === "string" && /^[a-fA-F0-9]{24}$/.test(value);
-
-  useEffect(() => {
-    fetchServicesForDashboard();
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
   }, [filters.category, filters.location]);
 
   useEffect(() => {
@@ -198,15 +204,55 @@ const UserDashboard = () => {
 
     let cancelled = false;
 
+    const embeddedProfiles = services.reduce((acc, service) => {
+      const providerId = getServiceProviderId(service);
+      if (!providerId) return acc;
+
+      const embeddedProfile =
+        (typeof service?.providerId === "object" && service.providerId) ||
+        service?.provider ||
+        service?.createdBy ||
+        service?.owner;
+
+      if (!embeddedProfile || typeof embeddedProfile !== "object") {
+        return acc;
+      }
+
+      acc[providerId] = {
+        id: providerId,
+        _id: providerId,
+        ...embeddedProfile,
+      };
+
+      return acc;
+    }, {});
+
+    setProviderProfiles((prev) => ({ ...prev, ...embeddedProfiles }));
+
+    const missingProviderIds = providerIds.filter((providerId) => {
+      const matchingService = services.find(
+        (service) => getServiceProviderId(service) === providerId
+      );
+      if (matchingService && serviceHasProviderSummary(matchingService)) {
+        return false;
+      }
+      const embedded = embeddedProfiles[providerId];
+      return !embedded?.profilePhoto && !embedded?.name && !embedded?.fullName;
+    });
+
+    if (!missingProviderIds.length) {
+      return undefined;
+    }
+
     const loadProfiles = async () => {
-      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      const profiles = await Promise.all(missingProviderIds.map((providerId) => getUserProfile(providerId)));
       if (cancelled) return;
       const nextProfiles = profiles.reduce((acc, profile) => {
         const providerId = getEntityId(profile);
         if (providerId) acc[providerId] = profile;
         return acc;
       }, {});
-      setProviderProfiles(nextProfiles);
+      setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
     };
 
     loadProfiles();
@@ -215,12 +261,6 @@ const UserDashboard = () => {
       cancelled = true;
     };
   }, [services]);
-
-  useEffect(() => {
-    const handleServiceUpdates = () => fetchServicesForDashboard();
-    window.addEventListener("services:updated", handleServiceUpdates);
-    return () => window.removeEventListener("services:updated", handleServiceUpdates);
-  }, [filters.category, filters.location]);
 
   useEffect(() => {
     if (!user?.uid) {

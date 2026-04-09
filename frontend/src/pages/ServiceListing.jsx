@@ -1,4 +1,4 @@
-import { useEffect, useState, useContext } from "react";
+import { useDeferredValue, useEffect, useState, useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import {
@@ -17,6 +17,7 @@ import {
   getEntityId,
   getLiveProviderPhoto,
   getServiceProviderId,
+  serviceHasProviderSummary,
 } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
@@ -26,9 +27,7 @@ const ServiceListing = () => {
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
   const role = user ? String(user.role || "").toLowerCase() : "";
-  const initialServices = getPublicServicesSnapshot();
-
-  const [services, setServices] = useState(initialServices);
+  const [services, setServices] = useState(() => getPublicServicesSnapshot());
   const [providerProfiles, setProviderProfiles] = useState({});
   const [searchInputs, setSearchInputs] = useState({
     selectedCategory: "All",
@@ -45,8 +44,9 @@ const ServiceListing = () => {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeQuickFilter, setActiveQuickFilter] = useState("all");
-  const [isLoading, setIsLoading] = useState(initialServices.length === 0);
+  const [isLoading, setIsLoading] = useState(() => services.length === 0);
   const [error, setError] = useState("");
+  const deferredServices = useDeferredValue(services);
 
   useEffect(() => {
     let unsub;
@@ -55,7 +55,7 @@ const ServiceListing = () => {
         setServices(list);
         setError("");
         setIsLoading(false);
-      });
+      }, { pollMs: 0 });
     } catch (err) {
       setServices([]);
       setError(err?.message || "Failed to load services.");
@@ -69,7 +69,7 @@ const ServiceListing = () => {
 
   useEffect(() => {
     const providerIds = [
-      ...new Set(services.map(getServiceProviderId).filter(Boolean)),
+      ...new Set(deferredServices.map(getServiceProviderId).filter(Boolean)),
     ];
 
     if (!providerIds.length) {
@@ -79,7 +79,7 @@ const ServiceListing = () => {
 
     let cancelled = false;
 
-    const embeddedProfiles = services.reduce((acc, service) => {
+    const embeddedProfiles = deferredServices.reduce((acc, service) => {
       const providerId = getServiceProviderId(service);
       if (!providerId) return acc;
 
@@ -105,6 +105,12 @@ const ServiceListing = () => {
     setProviderProfiles((prev) => ({ ...prev, ...embeddedProfiles }));
 
     const missingProviderIds = providerIds.filter((providerId) => {
+      const matchingService = deferredServices.find(
+        (service) => getServiceProviderId(service) === providerId
+      );
+      if (matchingService && serviceHasProviderSummary(matchingService)) {
+        return false;
+      }
       const embedded = embeddedProfiles[providerId];
       return !embedded?.profilePhoto && !embedded?.name && !embedded?.fullName;
     });
@@ -157,7 +163,7 @@ const ServiceListing = () => {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [services]);
+  }, [deferredServices]);
 
   const handleBookingClick = (serviceId) => {
     if (!user) {
@@ -240,124 +246,141 @@ const ServiceListing = () => {
   const DESCRIPTION_PREVIEW_LENGTH = 110;
   const showInitialSkeletons = isLoading && services.length === 0 && !error;
 
-  const categories = [
-    "All",
-    ...new Set(
-      services
-        .map((service) => service?.category)
-        .filter((category) => typeof category === "string" && category.trim())
-    ),
-  ];
+  const categories = useMemo(() => {
+    const nextCategories = [
+      "All",
+      ...new Set(
+        deferredServices
+          .map((service) => service?.category)
+          .filter((category) => typeof category === "string" && category.trim())
+      ),
+    ];
 
-  if (
-    appliedFilters.selectedCategory &&
-    !categories.includes(appliedFilters.selectedCategory)
-  ) {
-    categories.push(appliedFilters.selectedCategory);
-  }
+    if (
+      appliedFilters.selectedCategory &&
+      !nextCategories.includes(appliedFilters.selectedCategory)
+    ) {
+      nextCategories.push(appliedFilters.selectedCategory);
+    }
 
-  const locationSuggestions = [
-    ...new Set(
-      services
-        .flatMap(getServiceSearchLocations)
-        .map((location) => String(location).trim())
-        .filter(Boolean)
-    ),
-  ].slice(0, 30);
+    return nextCategories;
+  }, [appliedFilters.selectedCategory, deferredServices]);
 
-  const filteredServices = services.filter((service) => {
-    const category = (service?.category || "").toLowerCase();
-    const price = Number(service?.price);
+  const locationSuggestions = useMemo(
+    () =>
+      [
+        ...new Set(
+          deferredServices
+            .flatMap(getServiceSearchLocations)
+            .map((location) => String(location).trim())
+            .filter(Boolean)
+        ),
+      ].slice(0, 30),
+    [deferredServices]
+  );
 
+  const {
+    sortedServices,
+    availableServicesCount,
+    newestServicesCount,
+  } = useMemo(() => {
+    const now = Date.now();
+    const freshThreshold = now - 7 * 24 * 60 * 60 * 1000;
     const selectedCategory = appliedFilters.selectedCategory.toLowerCase();
     const minPrice = Number(appliedFilters.minPrice);
     const maxPrice = Number(appliedFilters.maxPrice);
 
-    const matchesCategory =
-      !selectedCategory ||
-      selectedCategory === "all" ||
-      category === selectedCategory;
+    const nextFiltered = deferredServices.filter((service) => {
+      const category = (service?.category || "").toLowerCase();
+      const price = Number(service?.price);
 
-    const matchesMinPrice =
-      appliedFilters.minPrice === "" ||
-      (Number.isFinite(price) && price >= minPrice);
+      const matchesCategory =
+        !selectedCategory ||
+        selectedCategory === "all" ||
+        category === selectedCategory;
 
-    const matchesMaxPrice =
-      appliedFilters.maxPrice === "" ||
-      (Number.isFinite(price) && price <= maxPrice);
+      const matchesMinPrice =
+        appliedFilters.minPrice === "" ||
+        (Number.isFinite(price) && price >= minPrice);
 
-    const matchesLocation = matchesLocationQuery(service, appliedFilters.location);
+      const matchesMaxPrice =
+        appliedFilters.maxPrice === "" ||
+        (Number.isFinite(price) && price <= maxPrice);
 
-    return (
-      matchesCategory &&
-      matchesMinPrice &&
-      matchesMaxPrice &&
-      matchesLocation
-    );
-  });
+      const matchesLocation = matchesLocationQuery(
+        service,
+        appliedFilters.location
+      );
 
-  const quickFilteredServices = filteredServices.filter((service) => {
-    const createdAtTime =
-      service?.createdAt instanceof Date
-        ? service.createdAt.getTime()
-        : new Date(service?.createdAt || 0).getTime();
+      return (
+        matchesCategory &&
+        matchesMinPrice &&
+        matchesMaxPrice &&
+        matchesLocation
+      );
+    });
 
-    const isFresh =
-      Number.isFinite(createdAtTime) &&
-      createdAtTime >= Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let availableCount = 0;
+    let newestCount = 0;
 
-    const isAvailable =
-      String(service?.availabilityStatus || "").toLowerCase() === "available";
+    const quickFiltered = nextFiltered.filter((service) => {
+      const createdAtTime =
+        service?.createdAt instanceof Date
+          ? service.createdAt.getTime()
+          : new Date(service?.createdAt || 0).getTime();
 
-    if (activeQuickFilter === "newest") return isFresh;
-    if (activeQuickFilter === "available") return isAvailable;
-    return true;
-  });
+      const isFresh =
+        Number.isFinite(createdAtTime) && createdAtTime >= freshThreshold;
 
-  const sortedServices = [...quickFilteredServices].sort((a, b) => {
-    const aTime =
-      a?.createdAt instanceof Date
-        ? a.createdAt.getTime()
-        : new Date(a?.createdAt || 0).getTime();
+      const isAvailable =
+        String(service?.availabilityStatus || "").toLowerCase() === "available";
 
-    const bTime =
-      b?.createdAt instanceof Date
-        ? b.createdAt.getTime()
-        : new Date(b?.createdAt || 0).getTime();
+      if (isAvailable) availableCount += 1;
+      if (isFresh) newestCount += 1;
 
-    return bTime - aTime;
-  });
+      if (activeQuickFilter === "newest") return isFresh;
+      if (activeQuickFilter === "available") return isAvailable;
+      return true;
+    });
 
-  const availableServicesCount = filteredServices.filter(
-    (service) =>
-      String(service?.availabilityStatus || "").toLowerCase() === "available"
-  ).length;
+    const nextSorted = [...quickFiltered].sort((a, b) => {
+      const aTime =
+        a?.createdAt instanceof Date
+          ? a.createdAt.getTime()
+          : new Date(a?.createdAt || 0).getTime();
 
-  const newestServicesCount = filteredServices.filter((service) => {
-    const createdAtTime =
-      service?.createdAt instanceof Date
-        ? service.createdAt.getTime()
-        : new Date(service?.createdAt || 0).getTime();
+      const bTime =
+        b?.createdAt instanceof Date
+          ? b.createdAt.getTime()
+          : new Date(b?.createdAt || 0).getTime();
 
-    return (
-      Number.isFinite(createdAtTime) &&
-      createdAtTime >= Date.now() - 7 * 24 * 60 * 60 * 1000
-    );
-  }).length;
+      return bTime - aTime;
+    });
 
-  const activeFilterChips = [
-    appliedFilters.selectedCategory &&
-    appliedFilters.selectedCategory !== "All"
-      ? `Category: ${appliedFilters.selectedCategory}`
-      : "",
-    appliedFilters.location ? `Location: ${appliedFilters.location}` : "",
-    appliedFilters.minPrice
-      ? `Min: ${formatLrdPrice(appliedFilters.minPrice)}`
-      : "",
-    appliedFilters.maxPrice
-      ? `Max: ${formatLrdPrice(appliedFilters.maxPrice)}`
-      : "",
-  ].filter(Boolean);
+    return {
+      sortedServices: nextSorted,
+      availableServicesCount: availableCount,
+      newestServicesCount: newestCount,
+    };
+  }, [activeQuickFilter, appliedFilters, deferredServices]);
+
+  const activeFilterChips = useMemo(
+    () =>
+      [
+        appliedFilters.selectedCategory &&
+        appliedFilters.selectedCategory !== "All"
+          ? `Category: ${appliedFilters.selectedCategory}`
+          : "",
+        appliedFilters.location ? `Location: ${appliedFilters.location}` : "",
+        appliedFilters.minPrice
+          ? `Min: ${formatLrdPrice(appliedFilters.minPrice)}`
+          : "",
+        appliedFilters.maxPrice
+          ? `Max: ${formatLrdPrice(appliedFilters.maxPrice)}`
+          : "",
+      ].filter(Boolean),
+    [appliedFilters]
+  );
 
   const hasActiveFilters = activeFilterChips.length > 0;
 

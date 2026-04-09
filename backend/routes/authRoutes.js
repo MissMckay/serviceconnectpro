@@ -5,8 +5,18 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const AdminInviteCode = require("../models/AdminInviteCode");
 const { getUserById } = require("../controllers/userLookupController");
+const connectDB = require("../config/db");
 
 const router = express.Router();
+
+const handleRouteError = (res, error) => {
+  if (connectDB.isMongoConnectionError(error)) {
+    connectDB.scheduleReconnect("auth-route-error");
+    return res.status(503).json({ message: "Database temporarily unavailable. Please try again." });
+  }
+
+  return res.status(500).json({ message: error.message });
+};
 
 /* ==============================
    REGISTER API
@@ -78,7 +88,7 @@ router.post("/register", async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleRouteError(res, error);
   }
 });
 
@@ -139,7 +149,7 @@ router.post("/register-admin", async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleRouteError(res, error);
   }
 });
 
@@ -155,7 +165,9 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail })
+      .read("secondaryPreferred")
+      .maxTimeMS(2500);
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
@@ -203,7 +215,7 @@ router.post("/login", async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleRouteError(res, error);
   }
 });
 

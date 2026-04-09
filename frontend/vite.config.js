@@ -15,6 +15,10 @@ export default defineConfig(({ mode }) => {
           manualChunks(id) {
             if (!id.includes("node_modules")) return;
             if (id.includes("swiper")) return "swiper";
+            if (id.includes("recharts")) return "charts";
+            if (id.includes("socket.io-client")) return "socket";
+            if (id.includes("axios")) return "network";
+            if (id.includes("react") || id.includes("scheduler")) return "react-vendor";
             return undefined;
           },
         },

@@ -5,7 +5,9 @@ const asyncHandler = require("../utils/asyncHandler");
 const { reviewSchema } = require("../validation/reviewValidation");
 
 const recalculateServiceAverageRating = async (serviceId) => {
-  const reviews = await Review.find({ serviceId }).select("rating");
+  const reviews = await Review.find({ serviceId })
+    .read("secondaryPreferred")
+    .select("rating");
   const count = reviews.length;
   if (!count) {
     await Service.findByIdAndUpdate(serviceId, { averageRating: 0 });
@@ -122,6 +124,7 @@ exports.getServiceReviews = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: await Review.find({ serviceId: req.params.serviceId })
+      .read("secondaryPreferred")
       .sort({ createdAt: -1 })
       .populate("userId", "name")
   });
@@ -131,6 +134,8 @@ exports.getReviewByBooking = asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ message: "Authentication required" });
-  const review = await Review.findOne({ bookingId, userId }).lean();
+  const review = await Review.findOne({ bookingId, userId })
+    .read("secondaryPreferred")
+    .lean();
   res.json({ success: true, data: review });
 });

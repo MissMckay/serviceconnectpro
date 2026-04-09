@@ -8,7 +8,10 @@ exports.getUserById = asyncHandler(async (req, res) => {
     error.statusCode = 404;
     throw error;
   }
-  const user = await User.findById(id.trim()).select("-password").lean();
+  const user = await User.findById(id.trim())
+    .read("secondaryPreferred")
+    .select("-password")
+    .lean();
   if (!user) {
     const error = new Error("User not found");
     error.statusCode = 404;
@@ -27,7 +30,10 @@ exports.getCurrentUser = asyncHandler(async (req, res) => {
     error.statusCode = 404;
     throw error;
   }
-  const user = await User.findById(String(userId)).select("-password").lean();
+  const user = await User.findById(String(userId))
+    .read("secondaryPreferred")
+    .select("-password")
+    .lean();
   if (!user) {
     const error = new Error("User not found");
     error.statusCode = 404;
@@ -64,7 +70,10 @@ exports.updateCurrentUser = asyncHandler(async (req, res) => {
     updates[key] = typeof value === "string" ? value.trim() : value;
   }
   if (Object.keys(updates).length === 0) {
-    const user = await User.findById(String(userId)).select("-password").lean();
+    const user = await User.findById(String(userId))
+      .read("secondaryPreferred")
+      .select("-password")
+      .lean();
     return res.json({ success: true, data: user ? { ...user, id: user._id } : {} });
   }
   const user = await User.findByIdAndUpdate(
@@ -89,7 +98,10 @@ exports.getProviderById = asyncHandler(async (req, res) => {
     error.statusCode = 404;
     throw error;
   }
-  const provider = await User.findOne({ _id: id.trim(), role: "provider" }).select("-password").lean();
+  const provider = await User.findOne({ _id: id.trim(), role: "provider" })
+    .read("secondaryPreferred")
+    .select("-password")
+    .lean();
   if (!provider) {
     const error = new Error("Provider not found");
     error.statusCode = 404;

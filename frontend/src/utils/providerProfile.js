@@ -24,3 +24,19 @@ export const getLiveProviderPhoto = (service, providerProfiles = {}) => {
     ""
   );
 };
+
+export const serviceHasProviderSummary = (service) =>
+  Boolean(
+    service?.providerProfilePhoto ||
+    service?.providerName ||
+    service?.providerAddress ||
+    service?.providerPhone ||
+    service?.providerId?.profilePhoto ||
+    service?.providerId?.name ||
+    service?.providerId?.providerAddress ||
+    service?.provider?.profilePhoto ||
+    service?.provider?.name ||
+    service?.provider?.providerAddress ||
+    service?.createdBy?.profilePhoto ||
+    service?.createdBy?.name
+  );

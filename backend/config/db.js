@@ -7,21 +7,52 @@ let listenersAttached = false;
 let activeConnectionPromise = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+let degradedUntil = 0;
+let lastConnectionIssue = null;
+let lastLoggedIssueKey = null;
 
 const CONNECTED_STATE = 1;
 const CONNECTING_STATE = 2;
+
+const setDegradedState = (error, reason = "unknown") => {
+  const cooldownMs = getIntEnv("MONGO_DEGRADED_COOLDOWN_MS", 15000);
+  degradedUntil = Date.now() + cooldownMs;
+  lastConnectionIssue = {
+    at: new Date().toISOString(),
+    reason,
+    name: error?.name || null,
+    message: error?.message || null,
+  };
+};
+
+const clearDegradedState = () => {
+  degradedUntil = 0;
+  lastConnectionIssue = null;
+  lastLoggedIssueKey = null;
+};
+
+const getConnectionStatus = () => ({
+  readyState: mongoose.connection.readyState,
+  connected: mongoose.connection.readyState === CONNECTED_STATE,
+  connecting: mongoose.connection.readyState === CONNECTING_STATE,
+  degraded: Date.now() < degradedUntil,
+  degradedUntil: degradedUntil || null,
+  lastConnectionIssue,
+});
 
 const getIntEnv = (name, fallback) => {
   const parsed = Number.parseInt(process.env[name] || "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const getMongoUri = () => {
+const getMongoUriConfig = () => {
   const rawStandardUri = process.env.MONGO_URI_STANDARD;
   const srvUri = process.env.MONGO_URI;
   const standardUri =
     rawStandardUri && rawStandardUri.startsWith("mongodb://") ? rawStandardUri : "";
   const mongoUri = standardUri || srvUri;
+  const fallbackUri = process.env.MONGO_FALLBACK_URI || "";
+  const dbName = (process.env.MONGO_DB_NAME || "").trim();
 
   if (!mongoUri) {
     if (rawStandardUri && rawStandardUri.startsWith("mongodb+srv://")) {
@@ -33,19 +64,26 @@ const getMongoUri = () => {
     throw new Error("MONGO_URI or MONGO_URI_STANDARD must be set in .env");
   }
 
-  return { mongoUri, usingStandardUri: Boolean(standardUri) };
+  return {
+    primaryUri: mongoUri,
+    fallbackUri,
+    dbName,
+    usingStandardUri: Boolean(standardUri),
+  };
 };
 
-const buildConnectionOptions = () => ({
-  serverSelectionTimeoutMS: getIntEnv("MONGO_SERVER_SELECTION_TIMEOUT_MS", 15000),
-  connectTimeoutMS: getIntEnv("MONGO_CONNECT_TIMEOUT_MS", 15000),
-  socketTimeoutMS: getIntEnv("MONGO_SOCKET_TIMEOUT_MS", 45000),
+const buildConnectionOptions = (dbName) => ({
+  serverSelectionTimeoutMS: getIntEnv("MONGO_SERVER_SELECTION_TIMEOUT_MS", 4000),
+  connectTimeoutMS: getIntEnv("MONGO_CONNECT_TIMEOUT_MS", 4000),
+  socketTimeoutMS: getIntEnv("MONGO_SOCKET_TIMEOUT_MS", 12000),
   heartbeatFrequencyMS: getIntEnv("MONGO_HEARTBEAT_FREQUENCY_MS", 10000),
   maxPoolSize: getIntEnv("MONGO_MAX_POOL_SIZE", 10),
   minPoolSize: getIntEnv("MONGO_MIN_POOL_SIZE", 1),
   family: getIntEnv("MONGO_IP_FAMILY", 4),
   retryReads: true,
-  retryWrites: true
+  retryWrites: true,
+  autoIndex: true,
+  ...(dbName ? { dbName } : {}),
 });
 
 const isMongoConnectionError = (error) => {
@@ -62,7 +100,7 @@ const isMongoConnectionError = (error) => {
     message.includes("connection"),
     message.includes("server selection"),
     message.includes("topology was destroyed"),
-    causeMessage.includes("timed out")
+    causeMessage.includes("timed out"),
   ].some(Boolean);
 };
 
@@ -72,30 +110,31 @@ const attachConnectionListeners = () => {
 
   mongoose.connection.on("connected", () => {
     reconnectAttempts = 0;
+    clearDegradedState();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
 
     const dbName = mongoose.connection.db?.databaseName || "unknown";
-    console.log("MongoDB connection event: connected to", dbName);
+    const host = mongoose.connection.host || "unknown-host";
+    console.log(`MongoDB connected to ${dbName} on ${host}`);
   });
 
   mongoose.connection.on("reconnected", () => {
     reconnectAttempts = 0;
-    console.log("MongoDB connection event: reconnected");
+    clearDegradedState();
+    console.log("MongoDB reconnected");
   });
 
   mongoose.connection.on("disconnected", () => {
-    console.error("MongoDB connection event: disconnected");
+    setDegradedState(null, "disconnected");
     scheduleReconnect("disconnected");
   });
 
   mongoose.connection.on("error", (error) => {
-    console.error("MongoDB connection event: error");
-    console.error(error);
-
     if (isMongoConnectionError(error)) {
+      setDegradedState(error, error.name || "error");
       scheduleReconnect(error.name || "error");
     }
   });
@@ -112,6 +151,21 @@ const configureDns = (mongoUri, usingStandardUri) => {
   if (configuredServers.length > 0) {
     dns.setServers(configuredServers);
   }
+};
+
+const buildConnectionTargets = ({ primaryUri, fallbackUri, dbName, usingStandardUri }) => {
+  const targets = [{ uri: primaryUri, dbName, usingStandardUri, label: "primary" }];
+
+  if (fallbackUri.trim()) {
+    targets.push({
+      uri: fallbackUri.trim(),
+      dbName,
+      usingStandardUri: fallbackUri.startsWith("mongodb://"),
+      label: "fallback",
+    });
+  }
+
+  return targets;
 };
 
 const logConnectionGuidance = (error, attempt, maxRetries, usingStandardUri) => {
@@ -136,6 +190,20 @@ const logConnectionGuidance = (error, attempt, maxRetries, usingStandardUri) => 
     lowerMessage.includes("could not connect to any servers") ||
     lowerMessage.includes("timed out");
 
+  const issueKey = [
+    error?.name || "Error",
+    error?.code || "",
+    reasonType || "",
+    lowerMessage,
+    usingStandardUri ? "standard" : "srv",
+  ].join("|");
+
+  if (attempt > 1 && lastLoggedIssueKey === issueKey) {
+    return;
+  }
+
+  lastLoggedIssueKey = issueKey;
+
   console.error(`MongoDB connection attempt ${attempt} of ${maxRetries} failed.`);
 
   if (isSrvRefused && !usingStandardUri) {
@@ -152,29 +220,56 @@ const logConnectionGuidance = (error, attempt, maxRetries, usingStandardUri) => 
   console.error(error);
 };
 
-const connectWithRetry = async () => {
-  const { mongoUri, usingStandardUri } = getMongoUri();
-  const maxRetries = getIntEnv("MONGO_CONNECT_RETRIES", 5);
-  const baseDelayMs = getIntEnv("MONGO_CONNECT_BASE_DELAY_MS", 1000);
+const verifyConnection = async () => {
+  try {
+    await mongoose.connection.db.admin().ping();
+  } catch (error) {
+    throw error;
+  }
+};
 
-  configureDns(mongoUri, usingStandardUri);
+const connectWithRetry = async () => {
+  const config = getMongoUriConfig();
+  const targets = buildConnectionTargets(config);
+  const maxRetries = getIntEnv("MONGO_CONNECT_RETRIES", 5);
+  const baseDelayMs = getIntEnv("MONGO_CONNECT_BASE_DELAY_MS", 2000);
   mongoose.set("bufferCommands", false);
   attachConnectionListeners();
 
-  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
-    try {
-      await mongoose.connect(mongoUri, buildConnectionOptions());
-      const dbName = mongoose.connection.db?.databaseName || "unknown";
-      console.log("MongoDB Connected to database:", dbName);
-      return mongoose.connection;
-    } catch (error) {
-      logConnectionGuidance(error, attempt, maxRetries, usingStandardUri);
+  for (const target of targets) {
+    configureDns(target.uri, target.usingStandardUri);
 
-      if (attempt < maxRetries) {
-        const backoffMs = baseDelayMs * attempt;
-        console.error(`Retrying in ${backoffMs}ms...`);
-        await sleep(backoffMs);
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      try {
+        await mongoose.connect(target.uri, buildConnectionOptions(target.dbName));
+        await verifyConnection();
+
+        const dbName = mongoose.connection.db?.databaseName || "unknown";
+        const host = mongoose.connection.host || "unknown-host";
+        console.log(`MongoDB ready: ${dbName} on ${host} using ${target.label} URI`);
+
+        return mongoose.connection;
+      } catch (error) {
+        if (isMongoConnectionError(error)) {
+          setDegradedState(error, `connect-${target.label}`);
+        }
+        logConnectionGuidance(error, attempt, maxRetries, target.usingStandardUri);
+
+        try {
+          await mongoose.disconnect();
+        } catch (_) {
+          // ignore disconnect cleanup errors
+        }
+
+        if (attempt < maxRetries) {
+          const backoffMs = baseDelayMs * attempt;
+          await sleep(backoffMs);
+        }
       }
+    }
+
+    if (targets.length > 1 && target.label === "primary") {
+      console.warn("Primary MongoDB URI failed. Trying fallback URI.");
     }
   }
 
@@ -197,8 +292,30 @@ const connectDB = async () => {
   return activeConnectionPromise;
 };
 
+const forceReconnect = async (reason = "manual") => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  try {
+    await mongoose.disconnect();
+  } catch (_) {
+    // ignore disconnect cleanup errors
+  }
+
+  activeConnectionPromise = null;
+  reconnectAttempts = 0;
+  setDegradedState(null, `force-reconnect:${reason}`);
+
+  return connectDB();
+};
+
 const scheduleReconnect = (reason = "unknown") => {
-  if (mongoose.connection.readyState === CONNECTED_STATE || mongoose.connection.readyState === CONNECTING_STATE) {
+  if (
+    mongoose.connection.readyState === CONNECTED_STATE ||
+    mongoose.connection.readyState === CONNECTING_STATE
+  ) {
     return;
   }
 
@@ -207,24 +324,22 @@ const scheduleReconnect = (reason = "unknown") => {
   }
 
   reconnectAttempts += 1;
-  const baseDelayMs = getIntEnv("MONGO_RECONNECT_BASE_DELAY_MS", 2000);
+  const baseDelayMs = getIntEnv("MONGO_RECONNECT_BASE_DELAY_MS", 3000);
   const maxDelayMs = getIntEnv("MONGO_RECONNECT_MAX_DELAY_MS", 30000);
   const delayMs = Math.min(baseDelayMs * reconnectAttempts, maxDelayMs);
-
-  console.error(`Scheduling MongoDB reconnect in ${delayMs}ms (${reason}).`);
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectDB().catch((error) => {
-      console.error("MongoDB reconnect attempt failed.");
-      console.error(error);
       scheduleReconnect("retry-failed");
     });
   }, delayMs);
 };
 
 connectDB.ensureConnected = connectDB;
+connectDB.forceReconnect = forceReconnect;
 connectDB.scheduleReconnect = scheduleReconnect;
 connectDB.isMongoConnectionError = isMongoConnectionError;
+connectDB.getConnectionStatus = getConnectionStatus;
 
 module.exports = connectDB;

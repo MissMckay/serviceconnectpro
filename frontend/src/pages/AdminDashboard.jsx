@@ -4,7 +4,7 @@ import API from "../services/api";
 import { AuthContext } from "../context/AuthContext";
 import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeServices } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
-import { getEntityId, getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
+import { getEntityId, getLiveProviderPhoto, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
 
 const allowedSections = new Set(["overview", "users", "services", "reports", "create-admin"]);
 
@@ -197,13 +197,14 @@ const AdminDashboard = () => {
     if (!user?.uid) return;
     const unsub = subscribeServices({}, (list) => {
       setOverviewServices(Array.isArray(list) ? list : []);
-    });
+    }, { pollMs: 0 });
     return () => { if (typeof unsub === "function") unsub(); };
   }, [user?.uid]);
 
   useEffect(() => {
+    const combinedServices = [...overviewServices, ...services];
     const providerIds = [
-      ...new Set([...overviewServices, ...services].map(getServiceProviderId).filter(Boolean))
+      ...new Set(combinedServices.map(getServiceProviderId).filter(Boolean))
     ];
 
     if (!providerIds.length) {
@@ -213,8 +214,21 @@ const AdminDashboard = () => {
 
     let cancelled = false;
 
+    const providersNeedingHydration = providerIds.filter((providerId) => {
+      const matchingService = combinedServices.find(
+        (service) => getServiceProviderId(service) === providerId
+      );
+      return !(matchingService && serviceHasProviderSummary(matchingService));
+    });
+
+    if (!providersNeedingHydration.length) {
+      return undefined;
+    }
+
     const loadProfiles = async () => {
-      const profiles = await Promise.all(providerIds.map((providerId) => getUserProfile(providerId)));
+      const profiles = await Promise.all(
+        providersNeedingHydration.map((providerId) => getUserProfile(providerId))
+      );
       if (cancelled) return;
       const nextProfiles = profiles.reduce((acc, profile) => {
         const providerId = getEntityId(profile);

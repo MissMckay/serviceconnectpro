@@ -11,6 +11,62 @@ let publicServicesSnapshotMemory = [];
 
 function noopUnsub() {}
 
+function createWindowAwarePoller(fetcher, pollMs) {
+  const canListen =
+    typeof window !== "undefined" && typeof document !== "undefined";
+
+  let intervalId = null;
+
+  const stopPolling = () => {
+    if (intervalId == null) return;
+    clearInterval(intervalId);
+    intervalId = null;
+  };
+
+  const startPolling = () => {
+    if (!Number.isFinite(Number(pollMs)) || Number(pollMs) <= 0 || intervalId != null) {
+      return;
+    }
+
+    if (canListen && document.visibilityState === "hidden") {
+      return;
+    }
+
+    intervalId = setInterval(() => {
+      if (canListen && document.visibilityState === "hidden") return;
+      fetcher(true);
+    }, Number(pollMs));
+  };
+
+  const handleRefresh = () => {
+    fetcher(true);
+    startPolling();
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      handleRefresh();
+    } else {
+      stopPolling();
+    }
+  };
+
+  fetcher(false);
+  startPolling();
+
+  if (canListen) {
+    window.addEventListener("focus", handleRefresh);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+  }
+
+  return () => {
+    stopPolling();
+    if (!canListen) return;
+    window.removeEventListener("focus", handleRefresh);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
+}
+
 function getCacheKey(type, key = "") {
   return `${type}:${key}`;
 }
@@ -91,6 +147,17 @@ function normalizeServiceFilters(filters = {}) {
     minPrice,
     maxPrice
   };
+}
+
+function buildServicesQuery(normalizedFilters = {}) {
+  const params = new URLSearchParams();
+  if (normalizedFilters.category) params.set("category", normalizedFilters.category);
+  if (normalizedFilters.minPrice != null) params.set("minPrice", normalizedFilters.minPrice);
+  if (normalizedFilters.maxPrice != null) params.set("maxPrice", normalizedFilters.maxPrice);
+  if (normalizedFilters.location) params.set("location", normalizedFilters.location);
+  if (normalizedFilters.providerId) params.set("providerId", normalizedFilters.providerId);
+  params.set("limit", "100");
+  return params.toString();
 }
 
 function writePublicServicesSnapshot(filters, services) {
@@ -174,6 +241,65 @@ async function getCachedOrFetch(cacheKey, fetcher, { forceFresh = false, ttlMs =
   return request;
 }
 
+async function fetchInBatches(items, batchSize, fetchItem) {
+  const results = [];
+
+  for (let index = 0; index < items.length; index += batchSize) {
+    const batch = items.slice(index, index + batchSize);
+    const batchResults = await Promise.all(batch.map((item) => fetchItem(item)));
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
+async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPages = false } = {}) {
+  const baseQuery = buildServicesQuery(normalizedFilters);
+
+  const fetchPage = async (page) => {
+    const pageParams = new URLSearchParams(baseQuery);
+    pageParams.set("page", String(page));
+    const res = await api.get(`services?${pageParams.toString()}`);
+    return res?.data ?? res;
+  };
+
+  const firstPayload = await fetchPage(1);
+  const { list: firstList, pagination } = extractServicesPayload(firstPayload);
+  const normalizedFirstList = normalizeServiceList(firstList);
+
+  if (typeof onFirstPage === "function") {
+    onFirstPage(normalizedFirstList, pagination);
+  }
+
+  if (!allPages) {
+    return normalizedFirstList;
+  }
+
+  const totalPages = Math.max(
+    Number.parseInt(pagination?.totalPages, 10) || 1,
+    pagination?.hasNextPage ? 2 : 1
+  );
+
+  if (totalPages <= 1) {
+    return normalizedFirstList;
+  }
+
+  const remainingPages = Array.from(
+    { length: Math.max(0, totalPages - 1) },
+    (_, index) => index + 2
+  );
+
+  const remainingPayloads =
+    remainingPages.length > 0
+      ? await fetchInBatches(remainingPages, 3, fetchPage)
+      : [];
+
+  return normalizeServiceList([
+    ...firstList,
+    ...remainingPayloads.flatMap((payload) => extractServicesPayload(payload).list),
+  ]);
+}
+
 // ---------- Users ----------
 export async function getUserProfile(uid, options = {}) {
   if (!uid) return null;
@@ -222,17 +348,15 @@ export function subscribeUserProfile(uid, setProfile) {
     if (setProfile) setProfile(null);
     return noopUnsub;
   }
-  const fetchProfile = async () => {
+  const fetchProfile = async (forceFresh = true) => {
     try {
-      const p = await getUserProfile(uid, { forceFresh: true });
+      const p = await getUserProfile(uid, { forceFresh });
       if (setProfile) setProfile(p);
     } catch {
       if (setProfile) setProfile(null);
     }
   };
-  fetchProfile();
-  const id = setInterval(fetchProfile, POLL_MS);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchProfile, POLL_MS);
 }
 
 /** Subscribe to users list with optional poll interval. */
@@ -253,9 +377,7 @@ export function subscribeUsers(setData, pollMs = 5000) {
       if (setData) setData([]);
     }
   };
-  fetchUsers();
-  const id = setInterval(fetchUsers, pollMs);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchUsers, pollMs);
 }
 
 // ---------- Services ----------
@@ -266,44 +388,13 @@ export function servicesRef() {
 export async function getServices(filters = {}) {
   const options = filters?.__options || {};
   const normalizedFilters = normalizeServiceFilters(filters);
-  const params = new URLSearchParams();
-  if (normalizedFilters.category) params.set("category", normalizedFilters.category);
-  if (normalizedFilters.minPrice != null) params.set("minPrice", normalizedFilters.minPrice);
-  if (normalizedFilters.maxPrice != null) params.set("maxPrice", normalizedFilters.maxPrice);
-  if (normalizedFilters.location) params.set("location", normalizedFilters.location);
-  if (normalizedFilters.providerId) params.set("providerId", normalizedFilters.providerId);
-  params.set("limit", "100");
-  const baseQuery = params.toString();
+  const baseQuery = buildServicesQuery(normalizedFilters);
   return getCachedOrFetch(
     getCacheKey("services", baseQuery),
     async () => {
-      const fetchPage = async (page) => {
-        const pageParams = new URLSearchParams(baseQuery);
-        pageParams.set("page", String(page));
-        const res = await api.get(`services?${pageParams.toString()}`);
-        return res?.data ?? res;
-      };
-
-      const firstPayload = await fetchPage(1);
-      const { list: firstList, pagination } = extractServicesPayload(firstPayload);
-      const totalPages = Math.max(
-        Number.parseInt(pagination?.totalPages, 10) || 1,
-        pagination?.hasNextPage ? 2 : 1
-      );
-
-      const remainingPayloads =
-        totalPages > 1
-          ? await Promise.all(
-              Array.from({ length: totalPages - 1 }, (_, index) => fetchPage(index + 2))
-            )
-          : [];
-
-      const list = [
-        ...firstList,
-        ...remainingPayloads.flatMap((payload) => extractServicesPayload(payload).list)
-      ];
-
-      const normalizedList = normalizeServiceList(list);
+      const normalizedList = await fetchServicesCollection(normalizedFilters, {
+        allPages: options.allPages === true,
+      });
       writePublicServicesSnapshot(normalizedFilters, normalizedList);
       return normalizedList;
     },
@@ -318,9 +409,19 @@ export function prewarmPublicData() {
   return publicDataPrewarmPromise;
 }
 
-export function subscribeServices(filters, setData) {
+export function subscribeServices(filters, setData, options = {}) {
   const normalizedFilters = normalizeServiceFilters(filters);
-  const hasActiveFilters = Object.values(normalizedFilters).some((value) => value != null && value !== "" && value !== "All");
+  const baseQuery = buildServicesQuery(normalizedFilters);
+  const cacheKey = getCacheKey("services", baseQuery);
+  const hasActiveFilters = Object.values(normalizedFilters).some(
+    (value) => value != null && value !== "" && value !== "All"
+  );
+  const pollMs =
+    options.pollMs === 0
+      ? 0
+      : Number.isFinite(Number(options.pollMs))
+        ? Number(options.pollMs)
+        : POLL_MS;
 
   if (!hasActiveFilters) {
     const cachedSnapshot = getPublicServicesSnapshot();
@@ -331,15 +432,49 @@ export function subscribeServices(filters, setData) {
 
   const fetchList = async (forceFresh = false) => {
     try {
-      const list = await getServices({ ...(filters || {}), __options: { forceFresh } });
+      if (!forceFresh) {
+        const cached = responseCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          if (setData) setData(cached.value);
+          return;
+        }
+      }
+
+      const list = await fetchServicesCollection(normalizedFilters, {
+        onFirstPage(firstPageList) {
+          if (setData) setData(firstPageList);
+          writePublicServicesSnapshot(normalizedFilters, firstPageList);
+        },
+        allPages: options.allPages === true,
+      });
+
+      responseCache.set(cacheKey, {
+        value: list,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+
       if (setData) setData(list);
     } catch {
       if (setData) setData([]);
     }
   };
-  fetchList(false);
-  const id = setInterval(() => fetchList(true), POLL_MS);
-  return () => clearInterval(id);
+  const canListenForRefresh = typeof window !== "undefined";
+
+  const handleRefresh = () => {
+    fetchList(true);
+  };
+
+  if (canListenForRefresh) {
+    window.addEventListener("services:updated", handleRefresh);
+  }
+
+  const cleanupPolling = createWindowAwarePoller(fetchList, pollMs);
+
+  return () => {
+    cleanupPolling();
+    if (!canListenForRefresh) return;
+    window.removeEventListener("services:updated", handleRefresh);
+  };
 }
 
 export async function getServiceById(id, options = {}) {
@@ -434,9 +569,7 @@ export function subscribeBookingsByUser(userId, setData) {
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, POLL_MS);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchList, POLL_MS);
 }
 
 export async function getBookingsByProvider(providerId) {
@@ -464,9 +597,7 @@ export function subscribeBookingsByProvider(providerId, setData) {
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, POLL_MS);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchList, POLL_MS);
 }
 
 export async function createBooking(userId, data) {
@@ -552,9 +683,7 @@ export function subscribeConversations(userId, setData) {
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, POLL_MS);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchList, 15000);
 }
 
 export async function getMessages(conversationId) {
@@ -585,9 +714,7 @@ export function subscribeMessages(conversationId, setData) {
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, POLL_MS);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchList, 15000);
 }
 
 export async function sendMessage(conversationId, senderId, text) {
@@ -698,7 +825,5 @@ export function subscribeAdminInviteCodes(createdByUid, setData, pollMs = 2000) 
       if (setData) setData([]);
     }
   };
-  fetchList();
-  const id = setInterval(fetchList, pollMs);
-  return () => clearInterval(id);
+  return createWindowAwarePoller(fetchList, pollMs);
 }

@@ -106,7 +106,9 @@ const normalizeServiceImages = (imagesInput) => {
 
 exports.createService = asyncHandler(async (req, res) => {
   const { serviceName, category, description, price, availabilityStatus, providerName, providerAddress, providerProfilePhoto } = req.body;
-  const providerQuery = User.findById(String(req.user.id)).select("role isApproved accountStatus name providerAddress profilePhoto");
+  const providerQuery = User.findById(String(req.user.id))
+    .read("secondaryPreferred")
+    .select("role isApproved accountStatus name providerAddress profilePhoto");
   const provider = typeof providerQuery.lean === "function" ? await providerQuery.lean() : await providerQuery;
 
   if (
@@ -176,8 +178,33 @@ const MONGO_CONNECTED_STATE = 1;
 const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "", providerId = "") =>
   `${page}|${limit}|${category}|${minPrice}|${maxPrice}|${location}|${providerId}`;
 
-const getFallbackServicesPayload = (page, limit, cachedPayload) => {
-  if (cachedPayload) return cachedPayload;
+const buildServicesMeta = ({
+  degraded = false,
+  reason = null,
+  message = null,
+  readyState = mongoose.connection.readyState,
+  cache = "none",
+} = {}) => ({
+  degraded,
+  reason,
+  message,
+  cache,
+  database: {
+    readyState,
+    connected: readyState === MONGO_CONNECTED_STATE,
+  },
+});
+
+const attachMeta = (payload, meta) => ({
+  ...payload,
+  meta,
+});
+
+const getFallbackServicesPayload = (page, limit, cachedPayload, meta) => {
+  if (cachedPayload) {
+    return attachMeta(cachedPayload, meta);
+  }
+
   return {
     success: true,
     data: [],
@@ -187,8 +214,28 @@ const getFallbackServicesPayload = (page, limit, cachedPayload) => {
       total: 0,
       totalPages: 1,
       hasNextPage: false
-    }
+    },
+    meta,
   };
+};
+
+const applyServiceUpdates = (service, body = {}) => {
+  const allowedFields = ["serviceName", "category", "description", "price", "availabilityStatus"];
+
+  allowedFields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      if (field === "price") {
+        service.price = Number(body.price);
+      } else {
+        service[field] = body[field];
+      }
+    }
+  });
+
+  if (IMAGE_FIELD_NAMES.some((fieldName) => Object.prototype.hasOwnProperty.call(body, fieldName))) {
+    const normalizedImages = normalizeServiceImages(getImagesFromBody(body)) || [];
+    service.images = normalizedImages;
+  }
 };
 
 exports.getAllServices = asyncHandler(async (req, res) => {
@@ -204,16 +251,57 @@ exports.getAllServices = asyncHandler(async (req, res) => {
 
   const cached = listCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
-    return res.json(cached.payload);
+    return res.json(
+      attachMeta(
+        cached.payload,
+        buildServicesMeta({ cache: "fresh" })
+      )
+    );
+  }
+
+  const connectionStatus =
+    typeof connectDB.getConnectionStatus === "function"
+      ? connectDB.getConnectionStatus()
+      : {
+          readyState: mongoose.connection.readyState,
+          connected: mongoose.connection.readyState === MONGO_CONNECTED_STATE,
+          degraded: false,
+          lastConnectionIssue: null,
+        };
+
+  if (connectionStatus.degraded) {
+    connectDB.scheduleReconnect("getAllServices-degraded");
+    return res.json(
+      getFallbackServicesPayload(
+        page,
+        limit,
+        cached?.payload,
+        buildServicesMeta({
+          degraded: true,
+          reason: "database_degraded",
+          message: "Services are temporarily loading from fallback data while the database reconnects.",
+          readyState: connectionStatus.readyState,
+          cache: cached?.payload ? "stale" : "none",
+        })
+      )
+    );
   }
 
   if (mongoose.connection.readyState !== MONGO_CONNECTED_STATE) {
-    console.error(
-      "getAllServices skipped: MongoDB is not connected.",
-      { readyState: mongoose.connection.readyState }
-    );
     connectDB.scheduleReconnect("getAllServices-not-connected");
-    return res.json(getFallbackServicesPayload(page, limit, cached?.payload));
+    return res.json(
+      getFallbackServicesPayload(
+        page,
+        limit,
+        cached?.payload,
+        buildServicesMeta({
+          degraded: true,
+          reason: "database_unavailable",
+          message: "Services are temporarily unavailable because the database is not connected.",
+          cache: cached?.payload ? "stale" : "none",
+        })
+      )
+    );
   }
 
   try {
@@ -227,10 +315,11 @@ exports.getAllServices = asyncHandler(async (req, res) => {
     const fetchLimit = limit + 1;
     const rawServices = await Service.find(filter)
       .select("serviceName category description price availabilityStatus images thumbnailUrl providerId providerName providerAddress providerProfilePhoto averageRating reviewsCount createdAt")
+      .read("secondaryPreferred")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(fetchLimit)
-      .maxTimeMS(4000)
+      .maxTimeMS(2500)
       .lean();
 
     const hasMore = rawServices.length > limit;
@@ -255,7 +344,10 @@ exports.getAllServices = asyncHandler(async (req, res) => {
         total,
         totalPages: Math.max(1, totalPages),
         hasNextPage: hasMore
-      }
+      },
+      meta: buildServicesMeta({
+        cache: cached?.payload ? "refresh" : "none",
+      }),
     };
 
     listCache.set(cacheKey, { payload, expiresAt: Date.now() + LIST_CACHE_TTL_MS });
@@ -267,13 +359,24 @@ exports.getAllServices = asyncHandler(async (req, res) => {
 
     res.json(payload);
   } catch (err) {
-    console.error("getAllServices error:", err);
     if (connectDB.isMongoConnectionError(err)) {
       connectDB.scheduleReconnect("getAllServices-query-failed");
     }
     // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
     const lastCached = listCache.get(cacheKey);
-    res.status(200).json(getFallbackServicesPayload(page, limit, lastCached?.payload));
+    res.status(200).json(
+      getFallbackServicesPayload(
+        page,
+        limit,
+        lastCached?.payload,
+        buildServicesMeta({
+          degraded: true,
+          reason: "database_query_failed",
+          message: "Services could not be refreshed because the database is temporarily unavailable.",
+          cache: lastCached?.payload ? "stale" : "none",
+        })
+      )
+    );
   }
 });
 
@@ -285,6 +388,7 @@ exports.getServiceById = asyncHandler(async (req, res) => {
     throw error;
   }
   const service = await Service.findOne({ _id: id, moderationStatus: { $ne: "removed" } })
+    .read("secondaryPreferred")
     .maxTimeMS(4000)
     .lean();
   if (!service) {
@@ -305,7 +409,7 @@ exports.updateService = asyncHandler(async (req, res) => {
     error.statusCode = 400;
     throw error;
   }
-  const service = await Service.findById(id);
+  const service = await Service.findById(id).read("secondaryPreferred");
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;
@@ -316,18 +420,6 @@ exports.updateService = asyncHandler(async (req, res) => {
     error.statusCode = 403;
     throw error;
   }
-
-  const allowedFields = ["serviceName", "category", "description", "price", "availabilityStatus"];
-
-  allowedFields.forEach((field) => {
-    if (Object.prototype.hasOwnProperty.call(req.body, field)) {
-      if (field === "price") {
-        service.price = Number(req.body.price);
-      } else {
-        service[field] = req.body[field];
-      }
-    }
-  });
 
   if (IMAGE_FIELD_NAMES.some((fieldName) => Object.prototype.hasOwnProperty.call(req.body, fieldName))) {
     const normalizedImages = normalizeServiceImages(getImagesFromBody(req.body)) || [];
@@ -341,8 +433,9 @@ exports.updateService = asyncHandler(async (req, res) => {
       error.statusCode = 400;
       throw error;
     }
-    service.images = normalizedImages;
   }
+
+  applyServiceUpdates(service, req.body);
 
   if (service.price <= 0) {
     const error = new Error("price must be a positive number");
@@ -350,7 +443,42 @@ exports.updateService = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  await service.save();
+  try {
+    await service.save();
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+
+    await connectDB.forceReconnect("updateService-save");
+
+    const retryService = await Service.findById(id);
+    if (!retryService) {
+      const notFoundError = new Error("Service not found");
+      notFoundError.statusCode = 404;
+      throw notFoundError;
+    }
+
+    if (String(retryService.providerId) !== String(req.user.id)) {
+      const authError = new Error("Not authorized to update this service");
+      authError.statusCode = 403;
+      throw authError;
+    }
+
+    applyServiceUpdates(retryService, req.body);
+
+    if (retryService.price <= 0) {
+      const retryValidationError = new Error("price must be a positive number");
+      retryValidationError.statusCode = 400;
+      throw retryValidationError;
+    }
+
+    await retryService.save();
+    return res.json({
+      success: true,
+      data: retryService
+    });
+  }
 
   res.json({
     success: true,
@@ -365,7 +493,7 @@ exports.deleteService = asyncHandler(async (req, res) => {
     error.statusCode = 400;
     throw error;
   }
-  const service = await Service.findById(id);
+  const service = await Service.findById(id).read("secondaryPreferred");
   if (!service) {
     const error = new Error("Service not found");
     error.statusCode = 404;

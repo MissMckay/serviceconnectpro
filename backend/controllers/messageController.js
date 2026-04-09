@@ -16,6 +16,7 @@ exports.getConversations = asyncHandler(async (req, res) => {
   }
 
   const conversations = await Conversation.find({ participants: currentId })
+    .read("secondaryPreferred")
     .sort({ lastMessageAt: -1 })
     .lean();
 
@@ -24,7 +25,10 @@ exports.getConversations = asyncHandler(async (req, res) => {
     const otherId = (conv.participants || []).find((p) => String(p) !== currentId);
     let otherUser = null;
     if (otherId) {
-      const u = await User.findById(otherId).select("name email profilePhoto").lean();
+      const u = await User.findById(otherId)
+        .read("secondaryPreferred")
+        .select("name email profilePhoto")
+        .lean();
       otherUser = u ? { _id: u._id, id: u._id, ...u } : { _id: otherId, id: otherId, name: "Unknown" };
     }
     list.push({
@@ -48,7 +52,9 @@ exports.getMessages = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Valid conversationId is required" });
   }
 
-  const conv = await Conversation.findById(conversationId).lean();
+  const conv = await Conversation.findById(conversationId)
+    .read("secondaryPreferred")
+    .lean();
   if (!conv) {
     return res.status(404).json({ message: "Conversation not found" });
   }
@@ -60,12 +66,16 @@ exports.getMessages = asyncHandler(async (req, res) => {
   }
 
   const messages = await Message.find({ conversationId: conv._id })
+    .read("secondaryPreferred")
     .sort({ createdAt: 1 })
     .lean();
 
   const withSender = [];
   for (const m of messages) {
-    const u = await User.findById(m.senderId).select("name profilePhoto").lean();
+    const u = await User.findById(m.senderId)
+      .read("secondaryPreferred")
+      .select("name profilePhoto")
+      .lean();
     withSender.push({
       ...m,
       senderId: m.senderId,
@@ -86,7 +96,9 @@ exports.getOrCreateConversation = asyncHandler(async (req, res) => {
   if (!key) {
     return res.status(400).json({ message: "Invalid user ids" });
   }
-  let conv = await Conversation.findOne({ participantKey: key }).lean();
+  let conv = await Conversation.findOne({ participantKey: key })
+    .read("secondaryPreferred")
+    .lean();
   if (!conv) {
     conv = await Conversation.create({
       participants: [myId, otherId].sort(),

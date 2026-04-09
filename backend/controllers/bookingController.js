@@ -2,6 +2,54 @@ const mongoose = require("mongoose");
 const Service = require("../models/Service");
 const Booking = require("../models/Booking");
 const asyncHandler = require("../utils/asyncHandler");
+const connectDB = require("../config/db");
+
+const findBookingForWrite = (id) => Booking.findById(id).read("secondaryPreferred");
+
+const retryBookingCreate = async (payload, reason) => {
+  await connectDB.forceReconnect(reason);
+  return Booking.create(payload);
+};
+
+const saveBookingWithRetry = async (booking, reason) => {
+  try {
+    await booking.save();
+    return booking;
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+
+    await connectDB.forceReconnect(reason);
+    const retryBooking = await findBookingForWrite(booking._id);
+    if (!retryBooking) {
+      const notFoundError = new Error("Booking not found");
+      notFoundError.statusCode = 404;
+      throw notFoundError;
+    }
+
+    retryBooking.set(booking.toObject());
+    await retryBooking.save();
+    return retryBooking;
+  }
+};
+
+const deleteBookingWithRetry = async (booking, reason) => {
+  try {
+    await booking.deleteOne();
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+
+    await connectDB.forceReconnect(reason);
+    const retryBooking = await findBookingForWrite(booking._id);
+    if (!retryBooking) {
+      return;
+    }
+    await retryBooking.deleteOne();
+  }
+};
 
 exports.createBooking = asyncHandler(async (req, res) => {
   const { serviceId, bookingDate } = req.body;
@@ -20,7 +68,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const service = await Service.findById(serviceId);
+  const service = await Service.findById(serviceId).read("secondaryPreferred");
 
   if (!service) {
     const error = new Error("Service not found");
@@ -28,13 +76,23 @@ exports.createBooking = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const booking = await Booking.create({
+  const bookingPayload = {
     serviceId: service._id,
     providerId: service.providerId,
     userId: req.user.id,
     bookingDate: parsedDate,
     status: "Pending"
-  });
+  };
+
+  let booking;
+  try {
+    booking = await Booking.create(bookingPayload);
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+    booking = await retryBookingCreate(bookingPayload, "createBooking-create");
+  }
 
   res.status(201).json({
     success: true,
@@ -61,6 +119,7 @@ exports.getBookingById = asyncHandler(async (req, res) => {
   }
 
   const booking = await Booking.findById(req.params.id)
+    .read("secondaryPreferred")
     .populate("serviceId")
     .populate("userId", "name email phone")
     .populate("providerId", "name email providerAddress");
@@ -109,7 +168,7 @@ exports.updateBookingStatus = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const booking = await Booking.findById(req.params.id);
+  const booking = await findBookingForWrite(req.params.id);
 
   if (!booking) {
     const error = new Error("Booking not found");
@@ -118,7 +177,7 @@ exports.updateBookingStatus = asyncHandler(async (req, res) => {
   }
 
   booking.status = status;
-  await booking.save();
+  await saveBookingWithRetry(booking, "updateBookingStatus-save");
 
   res.json({
     success: true,
@@ -156,7 +215,7 @@ exports.getUserBookings = asyncHandler(async (req, res) => {
 
 // Cancel Booking (User only if Pending)
 exports.cancelBooking = asyncHandler(async (req, res) => {
-  const booking = await Booking.findById(req.params.id);
+  const booking = await findBookingForWrite(req.params.id);
 
   if (!booking) {
     const error = new Error("Booking not found");
@@ -171,7 +230,7 @@ exports.cancelBooking = asyncHandler(async (req, res) => {
   }
 
   booking.status = "Cancelled";
-  await booking.save();
+  await saveBookingWithRetry(booking, "cancelBooking-save");
 
   res.json({
     success: true,
@@ -187,7 +246,7 @@ exports.deleteBooking = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const booking = await Booking.findById(req.params.id);
+  const booking = await findBookingForWrite(req.params.id);
 
   if (!booking) {
     const error = new Error("Booking not found");
@@ -204,7 +263,7 @@ exports.deleteBooking = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  await booking.deleteOne();
+  await deleteBookingWithRetry(booking, "deleteBooking-delete");
 
   res.json({
     success: true,

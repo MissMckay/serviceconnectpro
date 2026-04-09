@@ -3,6 +3,7 @@ const router = express.Router();
 
 const verifyToken = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
+const requireDbConnection = require("../middleware/requireDbConnection");
 
 const {
   getAllUsers,
@@ -22,7 +23,7 @@ const {
   deleteServiceAdmin
 } = require("../controllers/adminController");
 
-router.use(verifyToken, isAdmin);
+router.use(requireDbConnection, verifyToken, isAdmin);
 
 router.get("/users", getAllUsers);
 router.get("/users/:id", getUserDetailsAdmin);
