@@ -191,6 +191,7 @@ const ServiceListing = () => {
 
   const DESCRIPTION_PREVIEW_LENGTH = 110;
   const showInitialSkeletons = isLoading && services.length === 0 && !error;
+  const showResultsBar = !showInitialSkeletons;
 
   const categories = useMemo(() => {
     const nextCategories = [
@@ -655,6 +656,7 @@ const ServiceListing = () => {
         </section>
       )}
 
+      {showResultsBar && (
       <section className="services-results-bar" aria-label="Results summary">
         <div>
           <p className="services-results-bar__eyebrow">Search results</p>
@@ -668,6 +670,7 @@ const ServiceListing = () => {
           <span>Newest first</span>
         </div>
       </section>
+      )}
 
       {!isLoading && error && (
         <div className="service-listing-error">

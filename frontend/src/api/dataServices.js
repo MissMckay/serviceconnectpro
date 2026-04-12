@@ -492,7 +492,13 @@ export function subscribeServices(filters, setData, options = {}) {
 
       if (setData) setData(list);
     } catch {
-      if (setData) setData([]);
+      if (!hasActiveFilters) {
+        const fallbackList = getPublicServicesSnapshot();
+        if (fallbackList.length) {
+          if (setData) setData(fallbackList);
+          return;
+        }
+      }
     }
   };
   const canListenForRefresh = typeof window !== "undefined";

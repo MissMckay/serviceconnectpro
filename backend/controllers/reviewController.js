@@ -1,24 +1,47 @@
 const Review = require("../models/Review");
 const Booking = require("../models/Booking");
 const Service = require("../models/Service");
+const connectDB = require("../config/db");
 const asyncHandler = require("../utils/asyncHandler");
 const { reviewSchema } = require("../validation/reviewValidation");
 
+const withSecondaryPreferred = (query) =>
+  typeof query?.read === "function" ? query.read("secondaryPreferred") : query;
+
+const updateServiceRatingSummary = async (serviceId, payload, reason) => {
+  try {
+    await Service.findByIdAndUpdate(serviceId, payload);
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+
+    await connectDB.forceReconnect(reason);
+    await Service.findByIdAndUpdate(serviceId, payload);
+  }
+};
+
 const recalculateServiceAverageRating = async (serviceId) => {
-  const reviews = await Review.find({ serviceId })
-    .read("secondaryPreferred")
-    .select("rating");
+  const reviews = await withSecondaryPreferred(Review.find({ serviceId })).select("rating");
   const count = reviews.length;
   if (!count) {
-    await Service.findByIdAndUpdate(serviceId, { averageRating: 0, reviewsCount: 0 });
+    await updateServiceRatingSummary(
+      serviceId,
+      { averageRating: 0, reviewsCount: 0 },
+      "recalculateServiceAverageRating-reset"
+    );
     return 0;
   }
   const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / count;
   const roundedAverage = Number(avg.toFixed(1));
-  await Service.findByIdAndUpdate(serviceId, {
-    averageRating: roundedAverage,
-    reviewsCount: count,
-  });
+  await updateServiceRatingSummary(
+    serviceId,
+    {
+      averageRating: roundedAverage,
+      reviewsCount: count,
+    },
+    "recalculateServiceAverageRating-save"
+  );
   return roundedAverage;
 };
 
@@ -87,11 +110,23 @@ exports.createReview = asyncHandler(async (req, res) => {
     throw err;
   }
 
-  await recalculateServiceAverageRating(booking.serviceId);
+  let ratingSyncPending = false;
+  try {
+    await recalculateServiceAverageRating(booking.serviceId);
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+    connectDB.scheduleReconnect("createReview-rating-sync");
+    ratingSyncPending = true;
+  }
 
   res.status(201).json({
     success: true,
-    data: review
+    data: review,
+    meta: {
+      ratingSyncPending,
+    },
   });
 });
 
@@ -115,7 +150,14 @@ exports.deleteReview = asyncHandler(async (req, res) => {
 
   const { serviceId } = review;
   await review.deleteOne();
-  await recalculateServiceAverageRating(serviceId);
+  try {
+    await recalculateServiceAverageRating(serviceId);
+  } catch (error) {
+    if (!connectDB.isMongoConnectionError(error)) {
+      throw error;
+    }
+    connectDB.scheduleReconnect("deleteReview-rating-sync");
+  }
 
   res.json({
     success: true,
@@ -126,8 +168,7 @@ exports.deleteReview = asyncHandler(async (req, res) => {
 exports.getServiceReviews = asyncHandler(async (req, res) => {
   res.json({
     success: true,
-    data: await Review.find({ serviceId: req.params.serviceId })
-      .read("secondaryPreferred")
+    data: await withSecondaryPreferred(Review.find({ serviceId: req.params.serviceId }))
       .sort({ createdAt: -1 })
       .populate("userId", "name")
   });
@@ -137,8 +178,6 @@ exports.getReviewByBooking = asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ message: "Authentication required" });
-  const review = await Review.findOne({ bookingId, userId })
-    .read("secondaryPreferred")
-    .lean();
+  const review = await withSecondaryPreferred(Review.findOne({ bookingId, userId })).lean();
   res.json({ success: true, data: review });
 });
