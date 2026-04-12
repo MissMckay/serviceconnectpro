@@ -5407,11 +5407,12 @@
 }
 
 .services-page__title {
-  font-size: clamp(2rem, 3vw, 3.15rem);
+  font-size: clamp(1.75rem, 3.2vw, 3rem);
   line-height: 1.02;
   letter-spacing: -0.05em;
   margin: 0 0 12px;
-  max-width: 14ch;
+  max-width: none;
+  white-space: nowrap;
 }
 
 .services-page__subtitle {
@@ -5461,11 +5462,9 @@
 }
 
 .services-toolbar {
-  position: sticky;
-  top: 82px;
-  z-index: 13;
-  display: flex;
-  flex-wrap: nowrap;
+  position: static;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
   padding: 10px;
@@ -5474,12 +5473,12 @@
   border: 1px solid rgba(214, 222, 233, 0.95);
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
   backdrop-filter: blur(10px);
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .services-toolbar__btn {
-  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -5492,6 +5491,7 @@
   color: #0f172a;
   font-size: 0.88rem;
   font-weight: 800;
+  white-space: nowrap;
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
@@ -5505,7 +5505,7 @@
 }
 
 .services-summary-trigger {
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .services-summary-trigger span {
@@ -5892,7 +5892,9 @@
 
   .services-page__title {
     max-width: none;
-    font-size: 1.75rem;
+    font-size: clamp(1.2rem, 4.6vw, 1.75rem);
+    letter-spacing: -0.055em;
+    white-space: nowrap;
   }
 
   .services-page__hero-stats {
@@ -5914,16 +5916,25 @@
   }
 
   .services-toolbar {
-    top: 68px;
-    gap: 8px;
-    padding: 8px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px;
+    border-radius: 14px;
   }
 
   .services-toolbar__btn {
-    flex: 0 0 auto;
-    min-width: 0;
-    font-size: 0.8rem;
-    padding: 9px 10px;
+    font-size: 0.74rem;
+    min-height: 38px;
+    padding: 8px 5px;
+    border-radius: 11px;
+  }
+
+  .services-summary-trigger span {
+    display: none;
+  }
+
+  .services-summary-trigger strong {
+    font-size: inherit;
   }
 
   .services-search-panel__reset {
@@ -6044,7 +6055,7 @@
   }
 
   .services-page__title {
-    font-size: 1.52rem;
+    font-size: clamp(1.02rem, 4.45vw, 1.38rem);
   }
 
   .services-page__subtitle {
@@ -6057,14 +6068,14 @@
   }
 
   .services-toolbar {
-    top: 62px;
+    gap: 5px;
+    padding: 5px;
   }
 
   .services-toolbar__btn {
-    flex: 0 0 auto;
-    font-size: 0.76rem;
-    min-height: 40px;
-    padding: 8px 10px;
+    font-size: 0.68rem;
+    min-height: 36px;
+    padding: 7px 4px;
   }
 
   .services-summary-drawer {
