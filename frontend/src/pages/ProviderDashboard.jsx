@@ -13,6 +13,7 @@ import {
 } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { canProviderCreateServices, getProviderAccessMessage } from "../utils/providerAccess";
+import { prepareProfilePhotoUpload } from "../utils/imageUpload";
 import {
   AreaChart,
   Area,
@@ -66,10 +67,11 @@ const serviceCategoryOptions = [
 
 const MAX_SERVICE_IMAGE_COUNT = 7;
 const MAX_MEDIA_PAYLOAD_BYTES = 1650 * 1024;
-const MAX_PROFILE_PHOTO_BYTES = 180 * 1024;
 const MAX_SERVICE_IMAGE_BYTES = 280 * 1024;
 const MAX_SERVICE_THUMBNAIL_BYTES = 55 * 1024;
 const MAX_PROVIDER_PHOTO_DIMENSION = 160;
+const RECOMMENDED_SERVICE_SOURCE_BYTES = 1200 * 1024;
+const RECOMMENDED_SERVICE_SOURCE_DIMENSION = 2400;
 
 const getDataArray = (res) =>
   Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : [];
@@ -102,6 +104,12 @@ const getApproxPayloadBytes = (value) => {
   }
 };
 
+const formatFileSize = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
 const compressCanvasToDataUrl = (canvas, maxBytes, initialQuality = 0.82) => {
   let quality = initialQuality;
   let dataUrl = canvas.toDataURL("image/jpeg", quality);
@@ -128,32 +136,6 @@ const loadImageFromFile = (file) =>
     };
     image.src = imageUrl;
   });
-
-const compressProfilePhoto = async (file) => {
-  const image = await loadImageFromFile(file);
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Unable to process the selected image.");
-
-  const scale = Math.min(1, MAX_PROVIDER_PHOTO_DIMENSION / Math.max(image.width, image.height));
-  canvas.width = Math.max(1, Math.round(image.width * scale));
-  canvas.height = Math.max(1, Math.round(image.height * scale));
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  let quality = 0.82;
-  let dataUrl = canvas.toDataURL("image/jpeg", quality);
-
-  while (getApproxPayloadBytes(dataUrl) > MAX_PROFILE_PHOTO_BYTES && quality > 0.45) {
-    quality -= 0.12;
-    dataUrl = canvas.toDataURL("image/jpeg", quality);
-  }
-
-  if (getApproxPayloadBytes(dataUrl) > MAX_PROFILE_PHOTO_BYTES) {
-    throw new Error("Profile photo is too large. Please choose a smaller image.");
-  }
-
-  return dataUrl;
-};
 
 const buildScaledCanvas = (image, maxDimension) => {
   const canvas = document.createElement("canvas");
@@ -184,19 +166,34 @@ const buildCoverCanvas = (image, width, height) => {
   return canvas;
 };
 
-const compressServiceImage = async (file) => {
-  const image = await loadImageFromFile(file);
-  const fullCanvas = buildScaledCanvas(image, 1440);
-  const thumbnailCanvas = buildCoverCanvas(image, 360, 260);
+const compressServiceImage = async (file, options = {}) => {
+  const image = options.sourceImage || await loadImageFromFile(file);
+  const aggressive = options.aggressive === true;
+  const fullCanvas = buildScaledCanvas(image, aggressive ? 1120 : 1440);
+  const thumbnailCanvas = buildCoverCanvas(image, aggressive ? 320 : 360, aggressive ? 220 : 260);
 
-  const url = compressCanvasToDataUrl(fullCanvas, MAX_SERVICE_IMAGE_BYTES, 0.84);
-  const thumbnailUrl = compressCanvasToDataUrl(thumbnailCanvas, MAX_SERVICE_THUMBNAIL_BYTES, 0.78);
+  const url = compressCanvasToDataUrl(
+    fullCanvas,
+    MAX_SERVICE_IMAGE_BYTES,
+    aggressive ? 0.76 : 0.84
+  );
+  const thumbnailUrl = compressCanvasToDataUrl(
+    thumbnailCanvas,
+    MAX_SERVICE_THUMBNAIL_BYTES,
+    aggressive ? 0.68 : 0.78
+  );
 
   if (
     getApproxPayloadBytes(url) > MAX_SERVICE_IMAGE_BYTES ||
     getApproxPayloadBytes(thumbnailUrl) > MAX_SERVICE_THUMBNAIL_BYTES
   ) {
-    throw new Error(`Image ${file.name} is too large. Please choose a smaller image.`);
+    if (!aggressive) {
+      return compressServiceImage(file, {
+        sourceImage: image,
+        aggressive: true,
+      });
+    }
+    throw new Error(`Image ${file.name} is too large even after resizing. Please choose a smaller image.`);
   }
 
   return {
@@ -204,7 +201,31 @@ const compressServiceImage = async (file) => {
     thumbnailUrl,
     description: "",
     name: file.name,
+    wasResized: aggressive,
   };
+};
+
+const prepareServiceImageUpload = async (file) => {
+  const image = await loadImageFromFile(file);
+  const largestSide = Math.max(image.width, image.height);
+  const shouldOfferResize =
+    file.size > RECOMMENDED_SERVICE_SOURCE_BYTES ||
+    largestSide > RECOMMENDED_SERVICE_SOURCE_DIMENSION;
+
+  if (shouldOfferResize) {
+    const confirmed = window.confirm(
+      `"${file.name}" is ${formatFileSize(file.size)} and larger than the recommended upload size. Resize it automatically for faster loading and a safer upload?`
+    );
+
+    if (!confirmed) {
+      throw new Error(`Upload cancelled for ${file.name}. Please resize the image and try again.`);
+    }
+  }
+
+  return compressServiceImage(file, {
+    sourceImage: image,
+    aggressive: shouldOfferResize,
+  });
 };
 
 const getServiceImageEntries = (service) => {
@@ -355,11 +376,17 @@ const ProviderDashboard = () => {
       return;
     }
     try {
-      const dataUrl = await compressProfilePhoto(file);
+      const { dataUrl, wasResized } = await prepareProfilePhotoUpload(file, {
+        maxDimension: MAX_PROVIDER_PHOTO_DIMENSION,
+      });
       if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: dataUrl });
       await syncProviderPhotoAcrossServices(dataUrl);
       await refreshProfile();
-      showSuccess("Profile photo updated across your services.");
+      showSuccess(
+        wasResized
+          ? "Profile photo resized and updated across your services."
+          : "Profile photo updated across your services."
+      );
     } catch (err) {
       showError(err?.message || "Failed to update profile photo.");
     }
@@ -410,7 +437,7 @@ const ProviderDashboard = () => {
     const filesToUpload = incomingFiles.slice(0, remainingSlots);
     const skippedCount = Math.max(0, incomingFiles.length - filesToUpload.length);
     const results = await Promise.allSettled(
-      filesToUpload.map((file) => compressServiceImage(file))
+      filesToUpload.map((file) => prepareServiceImageUpload(file))
     );
 
     const uploaded = results
@@ -436,14 +463,21 @@ const ProviderDashboard = () => {
       }));
     }
 
+    const resizedCount = uploaded.filter((entry) => entry?.wasResized).length;
+
     if (failedNames.length || skippedCount > 0) {
       const failuresText = failedNames.length
         ? ` Failed to read: ${failedNames.join(", ")}.`
         : "";
       const skippedText = skippedCount > 0 ? ` ${skippedCount} file(s) were skipped due to the ${MAX_SERVICE_IMAGE_COUNT}-image limit.` : "";
-      showError(`Some files were not added.${failuresText}${skippedText}`);
+      const resizedText = resizedCount > 0 ? ` ${resizedCount} image(s) were resized automatically.` : "";
+      showError(`Some files were not added.${failuresText}${skippedText}${resizedText}`);
     } else {
-      showSuccess(`${uploaded.length} image(s) added.`);
+      showSuccess(
+        resizedCount > 0
+          ? `${uploaded.length} image(s) added. ${resizedCount} resized automatically.`
+          : `${uploaded.length} image(s) added.`
+      );
     }
 
     event.target.value = "";
@@ -464,7 +498,7 @@ const ProviderDashboard = () => {
     if (!file) return;
 
     try {
-      const nextEntry = await compressServiceImage(file);
+      const nextEntry = await prepareServiceImageUpload(file);
       const nextItems = serviceForm.imageDetails.map((entry, entryIndex) =>
         entryIndex === index
           ? {
@@ -484,7 +518,11 @@ const ProviderDashboard = () => {
         ...prev,
         imageDetails: nextItems,
       }));
-      showSuccess(`Image ${index + 1} replaced.`);
+      showSuccess(
+        nextEntry?.wasResized
+          ? `Image ${index + 1} replaced and resized automatically.`
+          : `Image ${index + 1} replaced.`
+      );
     } catch (err) {
       showError(err?.message || "Unable to replace this image.");
     }

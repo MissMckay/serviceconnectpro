@@ -8,6 +8,7 @@ import { getServiceMedia, getMarketplaceCardMedia } from "../utils/serviceMedia"
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
 import { getEntityId, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
+import { prepareProfilePhotoUpload } from "../utils/imageUpload";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
@@ -43,14 +44,6 @@ const UserDashboard = () => {
 
   const { user, refreshProfile } = useContext(AuthContext);
 
-  const readFileAsDataUrl = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error(`Unable to read file ${file.name}`));
-      reader.readAsDataURL(file);
-    });
-
   const handleProfilePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !file.type.startsWith("image/")) {
@@ -59,11 +52,11 @@ const UserDashboard = () => {
       return;
     }
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const { dataUrl, wasResized } = await prepareProfilePhotoUpload(file);
       if (user?.uid) await updateUserProfile(user.uid, { profilePhoto: dataUrl });
       await refreshProfile();
       setProfileData((prev) => (prev ? { ...prev, profilePhoto: dataUrl } : null));
-      setProfileError("");
+      setProfileError(wasResized ? "Profile photo resized automatically for a safer upload." : "");
     } catch (err) {
       setProfileError(err?.message || "Failed to update profile photo.");
     }
@@ -495,7 +488,23 @@ const UserDashboard = () => {
                       const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
                       return (
                         <article key={service._id} className="sc-card">
-                          <div className="sc-card__image-wrap">
+                          <div
+                            className="sc-card__image-wrap"
+                            onClick={() => navigate(`/services/${service._id}`, { state: { service } })}
+                            onPointerDown={() => preloadServiceDetailsRoute(service._id)}
+                            onTouchStart={() => preloadServiceDetailsRoute(service._id)}
+                            onMouseEnter={() => preloadServiceDetailsRoute(service._id)}
+                            onFocus={() => preloadServiceDetailsRoute(service._id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                navigate(`/services/${service._id}`, { state: { service } });
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Open details for ${service.serviceName || "this service"}`}
+                          >
                             {firstImageUrl ? (
                               <img
                                 src={firstImageUrl}
@@ -564,8 +573,10 @@ const UserDashboard = () => {
                                   onTouchStart={() => preloadServiceDetailsRoute(service._id)}
                                   onMouseEnter={() => preloadServiceDetailsRoute(service._id)}
                                   onFocus={() => preloadServiceDetailsRoute(service._id)}
+                                  aria-label={`View details for ${service.serviceName || "this service"}`}
+                                  title="View details"
                                 >
-                                  View details
+                                  View
                                 </button>
                                 <button
                                   type="button"
@@ -577,7 +588,7 @@ const UserDashboard = () => {
                                   onFocus={() => preloadBookingRoute(service._id)}
                                   disabled={!isAvailable}
                                 >
-                                  Book Now
+                                  Book
                                 </button>
                                 {getWhatsAppUrl(providerPhone) && (
                                   <a

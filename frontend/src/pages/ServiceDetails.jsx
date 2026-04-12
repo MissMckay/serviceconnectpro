@@ -21,6 +21,7 @@ const ServiceDetails = () => {
   const [isLoading, setIsLoading] = useState(() => !initialService);
   const [error, setError] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [activeMediaIndex, setActiveMediaIndex] = useState(0);
 
   const backTarget = state?.from === "user-dashboard" ? "/user" : "/services";
   const backLabel =
@@ -137,6 +138,10 @@ const ServiceDetails = () => {
     [reviews]
   );
 
+  useEffect(() => {
+    setActiveMediaIndex(0);
+  }, [id, service?._id]);
+
   if (isLoading) {
     return (
       <div className="service-details-page">
@@ -191,6 +196,7 @@ const ServiceDetails = () => {
 
   const serviceMedia = getServiceMedia(service);
   const totalImages = serviceMedia.length;
+  const selectedMedia = serviceMedia[activeMediaIndex] || serviceMedia[0] || null;
   const providerName = getProviderName(service);
   const providerAddress = getProviderAddress(service);
   const providerPhoto = getLiveProviderPhoto(service, {
@@ -229,27 +235,73 @@ const ServiceDetails = () => {
                       {totalImages} {totalImages === 1 ? "photo" : "photos"}
                     </span>
                   )}
-                  <div className="service-details-scroll-gallery" aria-label="Service images">
-                    {serviceMedia.map((item, index) => (
-                      <div className="service-details-gallery-slide" key={index}>
+                  <div className="service-details-gallery-frame" aria-label="Service images">
+                    {totalImages > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          className="service-details-gallery-nav service-details-gallery-nav--prev"
+                          onClick={() =>
+                            setActiveMediaIndex((prev) => (prev - 1 + totalImages) % totalImages)
+                          }
+                          aria-label="Show previous service photo"
+                        >
+                          {"<"}
+                        </button>
+                        <button
+                          type="button"
+                          className="service-details-gallery-nav service-details-gallery-nav--next"
+                          onClick={() =>
+                            setActiveMediaIndex((prev) => (prev + 1) % totalImages)
+                          }
+                          aria-label="Show next service photo"
+                        >
+                          {">"}
+                        </button>
+                      </>
+                    )}
+
+                    {selectedMedia && (
+                      <div className="service-details-gallery-slide">
                         <button
                           type="button"
                           className="service-details-zoom-wrap"
-                          onClick={() => setLightboxIndex(index)}
+                          onClick={() => setLightboxIndex(activeMediaIndex)}
                         >
                           <img
-                            src={item.url}
-                            alt={`${service.serviceName} — ${index + 1}`}
+                            src={selectedMedia.url}
+                            alt={`${service.serviceName} — ${activeMediaIndex + 1}`}
                             loading="lazy"
                             decoding="async"
                           />
                         </button>
-                        {item.description && (
-                          <p className="service-details-caption">{item.description}</p>
+                        {selectedMedia.description && (
+                          <p className="service-details-caption">{selectedMedia.description}</p>
                         )}
                       </div>
-                    ))}
+                    )}
                   </div>
+
+                  {totalImages > 1 && (
+                    <div className="service-details-gallery-thumbs" aria-label="Service image thumbnails">
+                      {serviceMedia.map((item, index) => (
+                        <button
+                          type="button"
+                          key={index}
+                          className={`service-details-gallery-thumb ${index === activeMediaIndex ? "is-active" : ""}`}
+                          onClick={() => setActiveMediaIndex(index)}
+                          aria-label={`Show photo ${index + 1}`}
+                        >
+                          <img
+                            src={item.url}
+                            alt={`${service.serviceName} thumbnail ${index + 1}`}
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {lightboxIndex !== null && (

@@ -7,7 +7,7 @@ import {
   getUserProfile,
 } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
-import { getMarketplaceCardMedia } from "../utils/serviceMedia";
+import { getMarketplaceCardMedia, getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import {
   getServiceSearchLocations,
@@ -48,6 +48,7 @@ const ServiceListing = () => {
   const [isLoading, setIsLoading] = useState(() => services.length === 0);
   const [error, setError] = useState("");
   const [providerProfiles, setProviderProfiles] = useState({});
+  const [cardMediaIndex, setCardMediaIndex] = useState({});
   const deferredServices = useDeferredValue(services);
 
   useEffect(() => {
@@ -187,6 +188,27 @@ const ServiceListing = () => {
     if (!num) return null;
     const text = encodeURIComponent("Hi, I'm interested in your service.");
     return `https://wa.me/${num}?text=${text}`;
+  };
+
+  const getCardImageIndex = (serviceId, mediaCount) => {
+    const nextIndex = Number(cardMediaIndex[serviceId] || 0);
+    if (!mediaCount || nextIndex < 0) return 0;
+    return nextIndex >= mediaCount ? 0 : nextIndex;
+  };
+
+  const shiftCardImage = (event, serviceId, mediaCount, direction) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!mediaCount || mediaCount <= 1) return;
+
+    setCardMediaIndex((prev) => {
+      const currentIndex = Number(prev[serviceId] || 0);
+      const nextIndex = (currentIndex + direction + mediaCount) % mediaCount;
+      return {
+        ...prev,
+        [serviceId]: nextIndex,
+      };
+    });
   };
 
   const DESCRIPTION_PREVIEW_LENGTH = 110;
@@ -717,8 +739,16 @@ const ServiceListing = () => {
             const isAvailable =
               (hydratedService?.availabilityStatus || "").toLowerCase() === "available";
 
-            const { serviceImageUrl: cardImageUrl, providerPhotoUrl: providerPhoto, mediaCount } =
+            const serviceMedia = getServiceMedia(hydratedService);
+            const activeMediaIndex = getCardImageIndex(
+              hydratedService._id,
+              serviceMedia.length
+            );
+            const activeMediaEntry = serviceMedia[activeMediaIndex] || null;
+
+            const { serviceImageUrl: fallbackImageUrl, providerPhotoUrl: providerPhoto, mediaCount } =
               getMarketplaceCardMedia(hydratedService, providerProfiles);
+            const cardImageUrl = activeMediaEntry?.url || fallbackImageUrl;
 
             const createdAtTime =
               hydratedService?.createdAt instanceof Date
@@ -731,18 +761,50 @@ const ServiceListing = () => {
 
             return (
               <article key={hydratedService._id} className="sc-card">
-                <button
-                  type="button"
+                <div
                   className="sc-card__image-wrap"
                   onClick={() => handleReviewClick(hydratedService._id, hydratedService)}
                   onPointerDown={() => preloadServiceDetailsRoute(hydratedService._id)}
                   onTouchStart={() => preloadServiceDetailsRoute(hydratedService._id)}
                   onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
                   onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleReviewClick(hydratedService._id, hydratedService);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   aria-label={`Open details for ${
                     hydratedService.serviceName || "this service"
                   }`}
                 >
+                  {mediaCount > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        className="sc-card__image-nav sc-card__image-nav--prev"
+                        onClick={(event) =>
+                          shiftCardImage(event, hydratedService._id, mediaCount, -1)
+                        }
+                        aria-label="Show previous service photo"
+                      >
+                        {"<"}
+                      </button>
+                      <button
+                        type="button"
+                        className="sc-card__image-nav sc-card__image-nav--next"
+                        onClick={(event) =>
+                          shiftCardImage(event, hydratedService._id, mediaCount, 1)
+                        }
+                        aria-label="Show next service photo"
+                      >
+                        {">"}
+                      </button>
+                    </>
+                  )}
+
                   {cardImageUrl ? (
                     <img
                       src={cardImageUrl}
@@ -800,7 +862,7 @@ const ServiceListing = () => {
                   >
                     No photo
                   </div>
-                </button>
+                </div>
 
                 <div className="sc-card__content">
                   <div className="sc-card__tags-row">
@@ -875,8 +937,10 @@ const ServiceListing = () => {
                         onTouchStart={() => preloadServiceDetailsRoute(hydratedService._id)}
                         onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
                         onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
+                        aria-label={`View details for ${hydratedService.serviceName || "this service"}`}
+                        title="View details"
                       >
-                        View details
+                        View
                       </button>
 
                       {(role === "user" || !role) && (
@@ -890,7 +954,7 @@ const ServiceListing = () => {
                           onFocus={() => preloadBookingRoute(hydratedService._id)}
                           disabled={!isAvailable}
                         >
-                          Book Now
+                          Book
                         </button>
                       )}
 

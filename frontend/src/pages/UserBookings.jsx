@@ -29,11 +29,11 @@ const UserBookings = () => {
 
   const cardStyle = {
     border: "1px solid #e3e7ee",
-    borderRadius: "14px",
-    padding: "16px",
-    marginBottom: "14px",
+    borderRadius: "12px",
+    padding: "12px",
+    marginBottom: "0",
     background: "var(--bg-white)",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)"
+    boxShadow: "0 6px 18px rgba(15, 23, 42, 0.07)"
   };
 
   const actionButtonStyle = {
@@ -352,45 +352,61 @@ const UserBookings = () => {
       {!error && bookings.length > 0 && (
         <div className="bookings-grid">
           {bookings.map((booking) => {
+            const serviceId = getServiceRefId(booking);
             const bookingImage = getBookingImage(booking);
             const providerPhoto = getProviderPhoto(booking);
             const providerName = getProviderName(booking);
             return (
-              <div key={booking._id} className="booking-card" style={cardStyle}>
-                {bookingImage ? (
-                  <img
-                    src={bookingImage}
-                    alt={getServiceName(booking)}
-                    style={{
-                      width: "100%",
-                      maxHeight: "220px",
-                      objectFit: "cover",
-                      borderRadius: "12px",
-                      marginBottom: "10px",
-                      border: "1px solid #e5e7eb"
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      minHeight: "120px",
-                      display: "grid",
-                      placeItems: "center",
-                      borderRadius: "12px",
-                      marginBottom: "10px",
-                      border: "1px dashed #d1d5db",
-                      color: "#6b7280",
-                      background: "#f8fafc"
-                    }}
-                  >
-                    No image uploaded
-                  </div>
-                )}
-                <p>
+              <div key={booking._id} className="booking-card booking-card--compact" style={cardStyle}>
+                <button
+                  type="button"
+                  className="booking-card__image-trigger"
+                  onClick={() =>
+                    serviceId &&
+                    navigate(`/services/${serviceId}`, {
+                      state: { from: "user-dashboard" }
+                    })
+                  }
+                  disabled={!serviceId}
+                  aria-label={serviceId ? `Open details for ${getServiceName(booking)}` : "Service details unavailable"}
+                >
+                  {bookingImage ? (
+                    <img
+                      className="booking-card__image"
+                      src={bookingImage}
+                      alt={getServiceName(booking)}
+                      style={{
+                        width: "100%",
+                        maxHeight: "64px",
+                        objectFit: "cover",
+                        borderRadius: "8px",
+                        marginBottom: "4px",
+                        border: "1px solid #e5e7eb"
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="booking-card__image booking-card__image--empty"
+                      style={{
+                        width: "100%",
+                        minHeight: "52px",
+                        display: "grid",
+                        placeItems: "center",
+                        borderRadius: "8px",
+                        marginBottom: "4px",
+                        border: "1px dashed #d1d5db",
+                        color: "#6b7280",
+                        background: "#f8fafc"
+                      }}
+                    >
+                      No image uploaded
+                    </div>
+                  )}
+                </button>
+                <p className="booking-card__meta">
                   <strong>Service:</strong> {getServiceName(booking)}
                 </p>
-                <p>
+                <p className="booking-card__meta">
                   <strong>Provider Name:</strong>{" "}
                   <span className="booking-provider-chip">
                     {providerPhoto ? (
@@ -401,45 +417,39 @@ const UserBookings = () => {
                     {providerName}
                   </span>
                 </p>
-                <p>
-                  <strong>Provider Address:</strong> {getProviderLocation(booking)}
-                </p>
-                <p>
+                <p className="booking-card__meta">
                   <strong>Category:</strong> {getServiceCategory(booking)}
                 </p>
-                <p>
-                  <strong>Description:</strong> {getServiceDescription(booking)}
-                </p>
-                <p>
+                <p className="booking-card__meta">
                   <strong>Price:</strong> {formatLrdPrice(getServicePrice(booking))}
                 </p>
 
-                <p>
+                <p className="booking-card__meta">
                   <strong>Status:</strong>{" "}
                   <span style={{ color: getStatusColor(booking.status) }}>
                     {booking.status}
                   </span>
                 </p>
 
-              <div style={{ marginTop: "12px" }}>
-                <h4 style={{ marginBottom: "8px" }}>Recent Reviews</h4>
+              <div className="booking-card__reviews">
+                <h4 className="booking-card__section-title">Recent Reviews</h4>
                 {(() => {
-                  const serviceId = getServiceRefId(booking);
                   const canOpenService = Boolean(serviceId);
                   const rawReviews = serviceReviewsMap[serviceId] || [];
                   const sortedReviews = [...rawReviews].sort(
                     (a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)
                   );
                   const recentReviews = sortedReviews.slice(0, 2);
+                  const compactRecentReviews = recentReviews.slice(0, 1);
 
-                  if (!recentReviews.length) {
-                    return <p style={{ margin: 0 }}>No reviews yet.</p>;
+                  if (!compactRecentReviews.length) {
+                    return <p className="booking-card__empty-text">No reviews yet.</p>;
                   }
 
                   return (
-                    <div>
-                      {recentReviews.map((review, index) => (
-                        <div key={review?._id || `${booking._id}-review-${index}`}>
+                    <div className="booking-card__review-list">
+                      {compactRecentReviews.map((review, index) => (
+                        <div key={review?._id || `${booking._id}-review-${index}`} className="booking-card__review-item">
                           <strong>
                             {typeof review === "string"
                               ? "Anonymous"
@@ -456,7 +466,8 @@ const UserBookings = () => {
                         </div>
                       ))}
                       <button
-                        style={{ ...actionButtonStyle, marginTop: "8px" }}
+                        style={{ ...actionButtonStyle, marginTop: "4px" }}
+                        className="booking-card__action-btn"
                         onClick={() =>
                           navigate(`/services/${serviceId}`, {
                             state: { from: "user-dashboard" }
@@ -484,8 +495,8 @@ const UserBookings = () => {
                 )}
 
                 {booking.status === "Completed" && (
-                  <div style={{ marginTop: "12px" }}>
-                    <h4 style={{ marginBottom: "8px" }}>Rate this completed job</h4>
+                  <div className="booking-card__review-form">
+                    <h4 className="booking-card__section-title">Rate this completed job</h4>
 
                   {reviews[booking._id]?.submitted ? (
                     <p style={{ color: "var(--brand-blue)", margin: 0 }}>
@@ -493,7 +504,7 @@ const UserBookings = () => {
                     </p>
                   ) : (
                     <>
-                      <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+                      <div className="booking-card__stars">
                         {[1, 2, 3, 4, 5].map((star) => {
                           const active = star <= Number(reviews[booking._id]?.rating || 5);
                           return (
@@ -507,7 +518,7 @@ const UserBookings = () => {
                                 background: "transparent",
                                 padding: 0,
                                 cursor: "pointer",
-                                fontSize: "22px",
+                                fontSize: "16px",
                                 lineHeight: 1,
                                 opacity: active ? 1 : 0.4,
                                 color: "var(--brand-red)"
@@ -519,9 +530,10 @@ const UserBookings = () => {
                         })}
                       </div>
 
-                      <div style={{ marginTop: "8px" }}>
+                      <div style={{ marginTop: "4px" }}>
                         <textarea
-                          rows={3}
+                          className="booking-card__textarea"
+                          rows={2}
                           placeholder="Write your comment"
                           value={reviews[booking._id]?.comment || ""}
                           onChange={(e) =>
@@ -530,15 +542,16 @@ const UserBookings = () => {
                           style={{
                             width: "100%",
                             maxWidth: "500px",
-                            borderRadius: "12px",
+                            borderRadius: "10px",
                             border: "1px solid #d7dbe3",
-                            padding: "10px"
+                            padding: "6px"
                           }}
                         />
                       </div>
 
                       <button
-                        style={{ ...actionButtonStyle, marginTop: "10px" }}
+                        style={{ ...actionButtonStyle, marginTop: "6px" }}
+                        className="booking-card__action-btn"
                         onClick={() => submitReview(booking._id)}
                         disabled={
                           submittingId === booking._id ||
@@ -552,10 +565,11 @@ const UserBookings = () => {
                   </div>
                 )}
 
-                <div className="booking-actions-end" style={{ marginTop: "10px" }}>
+                <div className="booking-actions-end booking-card__footer" style={{ marginTop: "6px" }}>
                   {getProviderId(booking) && String(booking.status || "").toLowerCase() === "completed" && (
                     <button
                       type="button"
+                      className="booking-card__action-btn"
                       style={{
                         ...actionButtonStyle,
                         background: "var(--brand-blue)",
@@ -575,6 +589,7 @@ const UserBookings = () => {
                     </button>
                   )}
                   <button
+                    className="booking-card__action-btn"
                     style={{
                       ...actionButtonStyle,
                       background: "#6b7280"
