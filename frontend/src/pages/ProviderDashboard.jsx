@@ -495,6 +495,13 @@ const ProviderDashboard = () => {
   const updateStatus = async (id, status) => {
     try {
       await updateBookingStatus(id, status);
+      setBookings((prev) =>
+        prev.map((booking) =>
+          String(booking?._id || "") === String(id)
+            ? { ...booking, status }
+            : booking
+        )
+      );
       showSuccess(`Booking marked as ${status}.`);
     } catch (err) {
       showError(err?.message || "Unable to update booking status.");

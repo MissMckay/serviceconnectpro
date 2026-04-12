@@ -294,6 +294,27 @@ exports.updateBookingStatus = asyncHandler(async (req, res) => {
     throw error;
   }
 
+  if (String(booking.providerId) !== String(req.user.id)) {
+    const error = new Error("Only the assigned provider can update this booking");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const currentStatus = String(booking.status || "Pending");
+  const validTransitions = {
+    Pending: ["Accepted", "Rejected"],
+    Accepted: ["Completed"],
+    Rejected: [],
+    Cancelled: [],
+    Completed: [],
+  };
+
+  if (status !== currentStatus && !validTransitions[currentStatus]?.includes(status)) {
+    const error = new Error(`Cannot change booking from ${currentStatus} to ${status}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
   booking.status = status;
   await saveBookingWithRetry(booking, "updateBookingStatus-save");
   clearProviderBookingsCache(booking.providerId);

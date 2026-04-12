@@ -144,7 +144,7 @@ test("POST /api/reviews stores review and updates service average rating", async
     assert.equal(body.success, true);
     assert.equal(body.data.rating, 5);
     assert.equal(updatedServiceId, "507f191e810c19729de860ac");
-    assert.deepEqual(updatedPayload, { averageRating: 4.5 });
+    assert.deepEqual(updatedPayload, { averageRating: 4.5, reviewsCount: 2 });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     Booking.findById = originalBookingFindById;
@@ -198,7 +198,7 @@ test("DELETE /api/reviews/:id recalculates average rating after deletion", async
     assert.equal(response.status, 200);
     assert.equal(body.success, true);
     assert.equal(body.message, "Review deleted successfully");
-    assert.deepEqual(updatedPayload, { averageRating: 3.5 });
+    assert.deepEqual(updatedPayload, { averageRating: 3.5, reviewsCount: 2 });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     Review.findById = originalReviewFindById;
@@ -246,7 +246,7 @@ test("DELETE /api/reviews/:id sets service average rating to 0 when no reviews r
 
     assert.equal(response.status, 200);
     assert.equal(body.success, true);
-    assert.deepEqual(updatedPayload, { averageRating: 0 });
+    assert.deepEqual(updatedPayload, { averageRating: 0, reviewsCount: 0 });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     Review.findById = originalReviewFindById;

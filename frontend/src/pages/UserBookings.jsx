@@ -7,6 +7,7 @@ import {
   deleteBooking as deleteBookingRequest,
   createReview,
   getReviewByBookingAndUser,
+  getReviewsByService,
   getServiceById,
 } from "../firebase/firestoreServices";
 import { formatStars } from "../utils/rating";
@@ -18,6 +19,7 @@ const UserBookings = () => {
   const { user } = useContext(AuthContext);
   const [bookings, setBookings] = useState([]);
   const [servicesMap, setServicesMap] = useState({});
+  const [serviceReviewsMap, setServiceReviewsMap] = useState({});
   const [reviews, setReviews] = useState({});
   const [submittingId, setSubmittingId] = useState("");
   const [cancellingId, setCancellingId] = useState("");
@@ -135,6 +137,25 @@ const UserBookings = () => {
     else setServicesMap({});
   }, [bookings]);
 
+  useEffect(() => {
+    const loadReviews = async () => {
+      const ids = [...new Set(bookings.map((b) => getServiceRefId(b)).filter(Boolean))];
+      const map = {};
+      await Promise.all(
+        ids.map(async (sid) => {
+          try {
+            map[sid] = await getReviewsByService(sid);
+          } catch {
+            map[sid] = [];
+          }
+        })
+      );
+      setServiceReviewsMap(map);
+    };
+    if (bookings.length) loadReviews();
+    else setServiceReviewsMap({});
+  }, [bookings]);
+
   const cancelBooking = async (id) => {
     const booking = bookings.find((item) => String(item._id) === String(id));
     if (!booking) {
@@ -185,14 +206,30 @@ const UserBookings = () => {
     }
     setSubmittingId(bookingId);
     try {
-      await createReview({
+      const serviceId = getServiceRefId(booking);
+      const submittedReview = await createReview({
         bookingId,
-        serviceId: booking.serviceId,
+        serviceId,
         userId: user.uid,
         rating: Number(review.rating),
         comment: review.comment.trim(),
       });
       setReviews((prev) => ({ ...prev, [bookingId]: { ...review, submitted: true } }));
+      if (serviceId) {
+        setServiceReviewsMap((prev) => ({
+          ...prev,
+          [serviceId]: [
+            submittedReview || {
+              _id: `${bookingId}-local-review`,
+              userId: { name: user?.name || "You" },
+              rating: Number(review.rating),
+              comment: review.comment.trim(),
+              createdAt: new Date(),
+            },
+            ...(prev[serviceId] || []),
+          ],
+        }));
+      }
       alert("Review submitted successfully");
     } catch (err) {
       alert(err?.message || "Failed to submit review");
@@ -389,7 +426,7 @@ const UserBookings = () => {
                 {(() => {
                   const serviceId = getServiceRefId(booking);
                   const canOpenService = Boolean(serviceId);
-                  const rawReviews = [];
+                  const rawReviews = serviceReviewsMap[serviceId] || [];
                   const sortedReviews = [...rawReviews].sort(
                     (a, b) => getReviewTimestamp(b) - getReviewTimestamp(a)
                   );

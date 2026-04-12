@@ -10,12 +10,15 @@ const recalculateServiceAverageRating = async (serviceId) => {
     .select("rating");
   const count = reviews.length;
   if (!count) {
-    await Service.findByIdAndUpdate(serviceId, { averageRating: 0 });
+    await Service.findByIdAndUpdate(serviceId, { averageRating: 0, reviewsCount: 0 });
     return 0;
   }
   const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / count;
   const roundedAverage = Number(avg.toFixed(1));
-  await Service.findByIdAndUpdate(serviceId, { averageRating: roundedAverage });
+  await Service.findByIdAndUpdate(serviceId, {
+    averageRating: roundedAverage,
+    reviewsCount: count,
+  });
   return roundedAverage;
 };
 

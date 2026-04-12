@@ -4,6 +4,7 @@ const POLL_MS = 10000;
 const CACHE_TTL_MS = 15000;
 const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
 const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
+const PUBLIC_SERVICES_TIMEOUT_MS = 3000;
 const MAX_SERVICE_IMAGE_COUNT = 7;
 const MAX_PROVIDER_AVATAR_BYTES = 80 * 1024;
 const responseCache = new Map();
@@ -280,13 +281,18 @@ async function fetchInBatches(items, batchSize, fetchItem) {
   return results;
 }
 
-async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPages = false, limit } = {}) {
+async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPages = false, limit, timeoutMs } = {}) {
   const baseQuery = buildServicesQuery(normalizedFilters, { limit });
+  const requestTimeoutMs = Number.isFinite(Number(timeoutMs))
+    ? Number(timeoutMs)
+    : PUBLIC_SERVICES_TIMEOUT_MS;
 
   const fetchPage = async (page) => {
     const pageParams = new URLSearchParams(baseQuery);
     pageParams.set("page", String(page));
-    const res = await api.get(`services?${pageParams.toString()}`);
+    const res = await api.get(`services?${pageParams.toString()}`, {
+      timeoutMs: requestTimeoutMs,
+    });
     return res?.data ?? res;
   };
 
@@ -422,6 +428,7 @@ export async function getServices(filters = {}) {
       const normalizedList = await fetchServicesCollection(normalizedFilters, {
         allPages: options.allPages === true,
         limit: options.limit,
+        timeoutMs: options.timeoutMs,
       });
       writePublicServicesSnapshot(normalizedFilters, normalizedList);
       return normalizedList;
@@ -475,6 +482,7 @@ export function subscribeServices(filters, setData, options = {}) {
         },
         allPages: options.allPages === true,
         limit: options.limit,
+        timeoutMs: options.timeoutMs,
       });
 
       responseCache.set(cacheKey, {
@@ -829,18 +837,21 @@ export async function getReviewsByService(serviceId) {
 }
 
 export async function createReview(data) {
-  await api.post("reviews", {
+  const res = await api.post("reviews", {
     bookingId: data.bookingId,
     rating: data.rating,
     comment: data.comment ?? "",
   });
-  return null;
+  clearCacheByPrefix(getCacheKey("reviews", data.serviceId || ""));
+  clearCacheByPrefix("services:");
+  const payload = res?.data ?? res;
+  return payload?.data ?? payload ?? null;
 }
 
 export async function getReviewByBookingAndUser(bookingId, userId) {
   try {
     const res = await api.get(`reviews/booking/${bookingId}`);
-    const r = res?.data ?? res;
+    const r = Object.prototype.hasOwnProperty.call(res || {}, "data") ? res.data : res;
     return r ? { _id: r._id, id: r._id, ...r, createdAt: r.createdAt ? new Date(r.createdAt) : null } : null;
   } catch {
     return null;
