@@ -560,6 +560,8 @@ const UserDashboard = () => {
                                   type="button"
                                   className="sc-card__btn sc-card__btn--secondary"
                                   onClick={() => navigate(`/services/${service._id}`, { state: { service } })}
+                                  onPointerDown={() => preloadServiceDetailsRoute(service._id)}
+                                  onTouchStart={() => preloadServiceDetailsRoute(service._id)}
                                   onMouseEnter={() => preloadServiceDetailsRoute(service._id)}
                                   onFocus={() => preloadServiceDetailsRoute(service._id)}
                                 >
@@ -569,6 +571,8 @@ const UserDashboard = () => {
                                   type="button"
                                   className="sc-card__btn sc-card__btn--primary"
                                   onClick={() => navigate(`/book/${service._id}`, { state: { service, from: "user-dashboard" } })}
+                                  onPointerDown={() => preloadBookingRoute(service._id)}
+                                  onTouchStart={() => preloadBookingRoute(service._id)}
                                   onMouseEnter={() => preloadBookingRoute(service._id)}
                                   onFocus={() => preloadBookingRoute(service._id)}
                                   disabled={!isAvailable}

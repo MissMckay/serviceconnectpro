@@ -732,6 +732,8 @@ const ServiceListing = () => {
                   type="button"
                   className="sc-card__image-wrap"
                   onClick={() => handleReviewClick(hydratedService._id, hydratedService)}
+                  onPointerDown={() => preloadServiceDetailsRoute(hydratedService._id)}
+                  onTouchStart={() => preloadServiceDetailsRoute(hydratedService._id)}
                   onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
                   onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
                   aria-label={`Open details for ${
@@ -866,6 +868,8 @@ const ServiceListing = () => {
                         type="button"
                         className="sc-card__btn sc-card__btn--secondary"
                         onClick={() => handleReviewClick(hydratedService._id, hydratedService)}
+                        onPointerDown={() => preloadServiceDetailsRoute(hydratedService._id)}
+                        onTouchStart={() => preloadServiceDetailsRoute(hydratedService._id)}
                         onMouseEnter={() => preloadServiceDetailsRoute(hydratedService._id)}
                         onFocus={() => preloadServiceDetailsRoute(hydratedService._id)}
                       >
@@ -877,6 +881,8 @@ const ServiceListing = () => {
                           type="button"
                           className="sc-card__btn sc-card__btn--primary"
                           onClick={() => handleBookingClick(hydratedService._id, hydratedService)}
+                          onPointerDown={() => preloadBookingRoute(hydratedService._id)}
+                          onTouchStart={() => preloadBookingRoute(hydratedService._id)}
                           onMouseEnter={() => preloadBookingRoute(hydratedService._id)}
                           onFocus={() => preloadBookingRoute(hydratedService._id)}
                           disabled={!isAvailable}

@@ -6,12 +6,7 @@ import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
 import { preloadBookingRoute } from "../utils/routePreload";
-import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination } from "swiper/modules";
 import WhatsAppIcon from "../components/WhatsAppIcon";
-import "swiper/css";
-import "swiper/css/navigation";
-import "swiper/css/pagination";
 
 const ServiceDetails = () => {
   const { id } = useParams();
@@ -234,18 +229,9 @@ const ServiceDetails = () => {
                       {totalImages} {totalImages === 1 ? "photo" : "photos"}
                     </span>
                   )}
-                  <Swiper
-                    modules={[Navigation, Pagination]}
-                    spaceBetween={0}
-                    slidesPerView={1}
-                    slidesPerGroup={1}
-                    navigation
-                    pagination={{ clickable: true }}
-                    className="service-details-swiper"
-                    style={{ width: "100%" }}
-                  >
+                  <div className="service-details-scroll-gallery" aria-label="Service images">
                     {serviceMedia.map((item, index) => (
-                      <SwiperSlide key={index}>
+                      <div className="service-details-gallery-slide" key={index}>
                         <button
                           type="button"
                           className="service-details-zoom-wrap"
@@ -261,9 +247,9 @@ const ServiceDetails = () => {
                         {item.description && (
                           <p className="service-details-caption">{item.description}</p>
                         )}
-                      </SwiperSlide>
+                      </div>
                     ))}
-                  </Swiper>
+                  </div>
                 </div>
 
                 {lightboxIndex !== null && (
