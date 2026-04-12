@@ -51,8 +51,9 @@ const Register = () => {
       const token = loginRes.data.token;
       if (token) {
         sessionStorage.setItem("token", token);
-        sessionStorage.setItem("role", String(loginRes.data.user?.role || form.role).toLowerCase());
-        if (loginRes.data.user) sessionStorage.setItem("user", JSON.stringify(loginRes.data.user));
+        sessionStorage.setItem("serviceconnect_auth_session_version", "2");
+        sessionStorage.removeItem("role");
+        sessionStorage.removeItem("user");
       }
       alert("Registered Successfully");
       const role = String(loginRes.data.user?.role || form.role).toLowerCase();

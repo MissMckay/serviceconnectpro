@@ -5,6 +5,7 @@ const CACHE_TTL_MS = 15000;
 const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
 const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
 const MAX_SERVICE_IMAGE_COUNT = 7;
+const MAX_PROVIDER_AVATAR_BYTES = 80 * 1024;
 const responseCache = new Map();
 const inflightRequests = new Map();
 let publicDataPrewarmPromise = null;
@@ -92,6 +93,20 @@ function canUseStorage() {
   return Boolean(getStorage());
 }
 
+function getApproxBytes(value) {
+  return new Blob([String(value || "")]).size;
+}
+
+function normalizeProviderAvatar(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:") && getApproxBytes(trimmed) > MAX_PROVIDER_AVATAR_BYTES) {
+    return "";
+  }
+  return trimmed;
+}
+
 function normalizeServiceList(list) {
   return list.map((s) => ({
     _id: s._id,
@@ -102,10 +117,7 @@ function normalizeServiceList(list) {
       (Array.isArray(s.images) && (s.images[0]?.thumbnailUrl || s.images[0]?.imageUrl)) ||
       s.thumbnailUrl ||
       null,
-    providerProfilePhoto:
-      typeof s.providerProfilePhoto === "string" && s.providerProfilePhoto.startsWith("data:")
-        ? ""
-        : s.providerProfilePhoto || "",
+    providerProfilePhoto: normalizeProviderAvatar(s.providerProfilePhoto),
   }));
 }
 
@@ -157,14 +169,16 @@ function normalizeServiceFilters(filters = {}) {
   };
 }
 
-function buildServicesQuery(normalizedFilters = {}) {
+function buildServicesQuery(normalizedFilters = {}, options = {}) {
   const params = new URLSearchParams();
   if (normalizedFilters.category) params.set("category", normalizedFilters.category);
   if (normalizedFilters.minPrice != null) params.set("minPrice", normalizedFilters.minPrice);
   if (normalizedFilters.maxPrice != null) params.set("maxPrice", normalizedFilters.maxPrice);
   if (normalizedFilters.location) params.set("location", normalizedFilters.location);
   if (normalizedFilters.providerId) params.set("providerId", normalizedFilters.providerId);
-  params.set("limit", "100");
+  const defaultLimit = normalizedFilters.providerId ? 50 : 24;
+  const limit = Number.isFinite(Number(options.limit)) ? Number(options.limit) : defaultLimit;
+  params.set("limit", String(Math.min(Math.max(Math.trunc(limit), 1), 100)));
   return params.toString();
 }
 
@@ -235,12 +249,17 @@ async function getCachedOrFetch(cacheKey, fetcher, { forceFresh = false, ttlMs =
   }
 
   const request = (async () => {
-    const value = await fetcher();
-    responseCache.set(cacheKey, {
-      value,
-      expiresAt: Date.now() + ttlMs
-    });
-    return value;
+    try {
+      const value = await fetcher();
+      responseCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + ttlMs
+      });
+      return value;
+    } catch (error) {
+      if (cached) return cached.value;
+      throw error;
+    }
   })().finally(() => {
     inflightRequests.delete(cacheKey);
   });
@@ -261,8 +280,8 @@ async function fetchInBatches(items, batchSize, fetchItem) {
   return results;
 }
 
-async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPages = false } = {}) {
-  const baseQuery = buildServicesQuery(normalizedFilters);
+async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPages = false, limit } = {}) {
+  const baseQuery = buildServicesQuery(normalizedFilters, { limit });
 
   const fetchPage = async (page) => {
     const pageParams = new URLSearchParams(baseQuery);
@@ -396,12 +415,13 @@ export function servicesRef() {
 export async function getServices(filters = {}) {
   const options = filters?.__options || {};
   const normalizedFilters = normalizeServiceFilters(filters);
-  const baseQuery = buildServicesQuery(normalizedFilters);
+  const baseQuery = buildServicesQuery(normalizedFilters, options);
   return getCachedOrFetch(
     getCacheKey("services", baseQuery),
     async () => {
       const normalizedList = await fetchServicesCollection(normalizedFilters, {
         allPages: options.allPages === true,
+        limit: options.limit,
       });
       writePublicServicesSnapshot(normalizedFilters, normalizedList);
       return normalizedList;
@@ -419,7 +439,7 @@ export function prewarmPublicData() {
 
 export function subscribeServices(filters, setData, options = {}) {
   const normalizedFilters = normalizeServiceFilters(filters);
-  const baseQuery = buildServicesQuery(normalizedFilters);
+  const baseQuery = buildServicesQuery(normalizedFilters, options);
   const cacheKey = getCacheKey("services", baseQuery);
   const hasActiveFilters = Object.values(normalizedFilters).some(
     (value) => value != null && value !== "" && value !== "All"
@@ -454,6 +474,7 @@ export function subscribeServices(filters, setData, options = {}) {
           writePublicServicesSnapshot(normalizedFilters, firstPageList);
         },
         allPages: options.allPages === true,
+        limit: options.limit,
       });
 
       responseCache.set(cacheKey, {
@@ -491,10 +512,20 @@ export async function getServiceById(id, options = {}) {
     return await getCachedOrFetch(
       getCacheKey("service", id),
       async () => {
-        const res = await api.get(`services/${id}`);
+        const res = await api.get(`services/${id}`, {
+          timeoutMs: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 5000,
+        });
         const payload = res?.data ?? res;
         const s = payload?.data ?? payload;
-        return s ? { _id: s._id, id: s._id, ...s, createdAt: s.createdAt ? new Date(s.createdAt) : null } : null;
+        return s
+          ? {
+              _id: s._id,
+              id: s._id,
+              ...s,
+              providerProfilePhoto: normalizeProviderAvatar(s.providerProfilePhoto),
+              createdAt: s.createdAt ? new Date(s.createdAt) : null,
+            }
+          : null;
       },
       options
     );
@@ -673,7 +704,7 @@ export async function getOrCreateConversation(myId, otherId) {
   }
 }
 
-export async function getConversations(userId) {
+export async function getConversations(userId, options = {}) {
   try {
     return await getCachedOrFetch(
       getCacheKey("conversations", userId || "me"),
@@ -688,7 +719,7 @@ export async function getConversations(userId) {
           createdAt: c.createdAt ? new Date(c.createdAt) : null,
         }));
       },
-      { ttlMs: 10000 }
+      { ttlMs: 10000, ...options }
     );
   } catch {
     return [];
@@ -699,7 +730,7 @@ export function subscribeConversations(userId, setData) {
   const cacheKey = getCacheKey("conversations", userId || "me");
   const fetchList = async () => {
     try {
-      const list = await getConversations(userId);
+      const list = await getConversations(userId, { forceFresh: true });
       if (setData) setData(list);
     } catch {
       if (setData) setData([]);
@@ -712,7 +743,7 @@ export function subscribeConversations(userId, setData) {
   return createWindowAwarePoller(fetchList, 8000);
 }
 
-export async function getMessages(conversationId) {
+export async function getMessages(conversationId, options = {}) {
   try {
     return await getCachedOrFetch(
       getCacheKey("messages", conversationId),
@@ -726,7 +757,7 @@ export async function getMessages(conversationId) {
           createdAt: m.createdAt ? new Date(m.createdAt) : null,
         }));
       },
-      { ttlMs: 5000 }
+      { ttlMs: 5000, ...options }
     );
   } catch {
     return [];
@@ -741,7 +772,7 @@ export function subscribeMessages(conversationId, setData) {
   const cacheKey = getCacheKey("messages", conversationId);
   const fetchList = async () => {
     try {
-      const list = await getMessages(conversationId);
+      const list = await getMessages(conversationId, { forceFresh: true });
       if (setData) setData(list);
     } catch {
       if (setData) setData([]);

@@ -22,6 +22,8 @@ export default function AdminLoginPage() {
       const role = String(user?.role || "").toLowerCase();
       if (role !== "admin") {
         sessionStorage.removeItem("token");
+        sessionStorage.removeItem("user");
+        sessionStorage.removeItem("role");
         setError("Only administrators can sign in here. Use the regular Login for other accounts.");
         setSubmitting(false);
         return;

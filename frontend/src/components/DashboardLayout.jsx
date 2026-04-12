@@ -31,14 +31,7 @@ const DashboardLayout = ({ role, children }) => {
   const location = useLocation();
   const { user: contextUser } = useContext(AuthContext);
   const safeRole = String(role || "").toLowerCase();
-  const storedUser = (() => {
-    try {
-      return JSON.parse(sessionStorage.getItem("user") || "{}");
-    } catch {
-      return {};
-    }
-  })();
-  const providerUser = contextUser || storedUser;
+  const providerUser = contextUser || {};
   const navItems =
     safeRole === "provider" && !canProviderCreateServices(providerUser)
       ? navItemsByRole.provider.filter((item) => item.to !== "/provider?view=add")
@@ -114,6 +107,7 @@ const DashboardLayout = ({ role, children }) => {
                 <Link
                   key={`side-${item.to}`}
                   to={item.to}
+                  state={item.to === "/messages" ? { fromRole: safeRole } : undefined}
                   className={`protected-sidebar-link${isNavItemActive(item.to) ? " active" : ""}`}
                 >
                   {item.label}

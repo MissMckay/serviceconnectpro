@@ -10,7 +10,7 @@ import {
   getServiceById,
 } from "../firebase/firestoreServices";
 import { formatStars } from "../utils/rating";
-import { getServiceMedia } from "../utils/serviceMedia";
+import { getMarketplaceCardMedia, getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 
 const UserBookings = () => {
@@ -242,7 +242,12 @@ const UserBookings = () => {
     if (p && typeof p === "object" && (p._id || p.id)) return p._id || p.id;
     const sid = getServiceRefId(booking);
     const service = sid ? servicesMap[sid] : null;
-    return service?.providerId || null;
+    const serviceProvider = service?.providerId || service?.provider;
+    if (typeof serviceProvider === "string" && serviceProvider.trim()) return serviceProvider.trim();
+    if (serviceProvider && typeof serviceProvider === "object" && (serviceProvider._id || serviceProvider.id)) {
+      return serviceProvider._id || serviceProvider.id;
+    }
+    return null;
   };
 
   const getProviderLocation = (booking) => {
@@ -279,8 +284,14 @@ const UserBookings = () => {
     const sid = getServiceRefId(booking);
     const service = sid ? servicesMap[sid] : null;
     if (!service) return "";
-    const images = getServiceMedia(service);
-    return images.length > 0 ? images[0].url : "";
+    return getMarketplaceCardMedia(service).serviceImageUrl;
+  };
+
+  const getProviderPhoto = (booking) => {
+    const sid = getServiceRefId(booking);
+    const service = sid ? servicesMap[sid] : null;
+    if (!service) return "";
+    return getMarketplaceCardMedia(service).providerPhotoUrl;
   };
 
   return (
@@ -305,6 +316,8 @@ const UserBookings = () => {
         <div className="bookings-grid">
           {bookings.map((booking) => {
             const bookingImage = getBookingImage(booking);
+            const providerPhoto = getProviderPhoto(booking);
+            const providerName = getProviderName(booking);
             return (
               <div key={booking._id} className="booking-card" style={cardStyle}>
                 {bookingImage ? (
@@ -341,7 +354,15 @@ const UserBookings = () => {
                   <strong>Service:</strong> {getServiceName(booking)}
                 </p>
                 <p>
-                  <strong>Provider Name:</strong> {getProviderName(booking)}
+                  <strong>Provider Name:</strong>{" "}
+                  <span className="booking-provider-chip">
+                    {providerPhoto ? (
+                      <img src={providerPhoto} alt={providerName} />
+                    ) : (
+                      <span>{String(providerName || "?").trim().slice(0, 2).toUpperCase() || "?"}</span>
+                    )}
+                    {providerName}
+                  </span>
                 </p>
                 <p>
                   <strong>Provider Address:</strong> {getProviderLocation(booking)}
@@ -506,6 +527,7 @@ const UserBookings = () => {
                       onClick={() =>
                         navigate("/messages", {
                           state: {
+                            fromRole: "user",
                             recipientId: getProviderId(booking),
                             recipientName: getProviderName(booking)
                           }

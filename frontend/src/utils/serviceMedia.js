@@ -1,3 +1,5 @@
+import { getLiveProviderPhoto } from "./providerProfile";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "");
 
@@ -207,4 +209,12 @@ export function getFirstServiceImageUrl(service) {
   const media = getServiceMedia(service);
   if (media.length > 0 && media[0]?.url) return media[0].url;
   return "";
+}
+
+export function getMarketplaceCardMedia(service, providerProfiles = {}) {
+  return {
+    serviceImageUrl: getFirstServiceImageUrl(service),
+    providerPhotoUrl: normalizeUrl(getLiveProviderPhoto(service, providerProfiles)),
+    mediaCount: getServiceMedia(service).length,
+  };
 }

@@ -4,10 +4,10 @@ import { AuthContext } from "../context/AuthContext";
 import { getPublicServicesSnapshot, getUserProfile, subscribeBookingsByUser, subscribeServices, updateUserProfile } from "../firebase/firestoreServices";
 import UserBookings from "./UserBookings";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
-import { getServiceMedia, getFirstServiceImageUrl } from "../utils/serviceMedia";
+import { getServiceMedia, getMarketplaceCardMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getServiceSearchLocations, matchesLocationQuery } from "../utils/serviceSearch";
-import { getEntityId, getLiveProviderPhoto, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
+import { getEntityId, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
@@ -145,8 +145,6 @@ const UserDashboard = () => {
     return n.slice(0, 2).toUpperCase();
   };
 
-  const getProviderPhoto = (service) => getLiveProviderPhoto(service, providerProfiles);
-
   const formatPhoneForWhatsApp = (phone) => {
     const p = (phone || "").replace(/\D/g, "");
     return p ? p : null;
@@ -165,7 +163,7 @@ const UserDashboard = () => {
       .toLowerCase();
 
   useEffect(() => {
-    setIsLoading(true);
+    setIsLoading(services.length === 0);
     setError("");
 
     let unsub;
@@ -183,7 +181,7 @@ const UserDashboard = () => {
           setError("");
           setIsLoading(false);
         },
-        { pollMs: 0 }
+        { pollMs: 0, limit: 24 }
       );
     } catch (err) {
       setServices([]);
@@ -234,12 +232,16 @@ const UserDashboard = () => {
       const matchingService = services.find(
         (service) => getServiceProviderId(service) === providerId
       );
-      if (matchingService && serviceHasProviderSummary(matchingService)) {
+      if (
+        matchingService &&
+        serviceHasProviderSummary(matchingService) &&
+        getMarketplaceCardMedia(matchingService, providerProfiles).providerPhotoUrl
+      ) {
         return false;
       }
       const embedded = embeddedProfiles[providerId];
       return !embedded?.profilePhoto && !embedded?.name && !embedded?.fullName;
-    });
+    }).slice(0, 12);
 
     if (!missingProviderIds.length) {
       return undefined;
@@ -471,8 +473,8 @@ const UserDashboard = () => {
                 {!error && (
                   <div className="dashboard-grid">
                     {filteredServices.map((service) => {
-                      const firstImageUrl = getFirstServiceImageUrl(service);
-                      const providerPhoto = getProviderPhoto(service);
+                      const { serviceImageUrl: firstImageUrl, providerPhotoUrl: providerPhoto, mediaCount } =
+                        getMarketplaceCardMedia(service, providerProfiles);
                       const { average: embeddedAvg, count: embeddedCount } = getAverageRatingAndCount(service);
                       const displayRating = Number.isFinite(Number(service?.averageRating))
                         ? Number(service.averageRating)
@@ -512,6 +514,11 @@ const UserDashboard = () => {
                             <div className="sc-card__image-placeholder" style={{ display: firstImageUrl ? "none" : "flex" }}>
                               No photo
                             </div>
+                            {mediaCount > 1 && (
+                              <span className="sc-card__image-badge dashboard-card-photo-count">
+                                {mediaCount} photos
+                              </span>
+                            )}
                             <span className="sc-card__provider-badge" title={providerName}>
                               {providerPhoto ? (
                                 <img src={providerPhoto} alt={providerName} className="sc-card__provider-avatar" />

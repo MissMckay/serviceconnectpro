@@ -12,6 +12,25 @@ const defaultProfile = {
   providerAddress: "Not provided",
   profilePhoto: "",
 };
+const AUTH_PROFILE_TIMEOUT_MS = 5000;
+const AUTH_SESSION_VERSION_KEY = "serviceconnect_auth_session_version";
+const AUTH_SESSION_VERSION = "2";
+
+const clearStoredAuth = () => {
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("user");
+  sessionStorage.removeItem("role");
+  sessionStorage.removeItem(AUTH_SESSION_VERSION_KEY);
+};
+
+const storeToken = (token) => {
+  sessionStorage.removeItem("user");
+  sessionStorage.removeItem("role");
+  if (token) {
+    sessionStorage.setItem("token", token);
+    sessionStorage.setItem(AUTH_SESSION_VERSION_KEY, AUTH_SESSION_VERSION);
+  }
+};
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -20,23 +39,34 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const load = async () => {
       const token = sessionStorage.getItem("token");
+      const authSessionVersion = sessionStorage.getItem(AUTH_SESSION_VERSION_KEY);
+
+      if (token && authSessionVersion !== AUTH_SESSION_VERSION) {
+        clearStoredAuth();
+        setUser(null);
+        setAuthReady(true);
+        return;
+      }
+
       if (!token) {
+        sessionStorage.removeItem("user");
+        sessionStorage.removeItem("role");
         setUser(null);
         setAuthReady(true);
         return;
       }
       try {
-        const res = await API.get("/users/me");
+        const res = await API.get("/users/me", { timeout: AUTH_PROFILE_TIMEOUT_MS });
         const data = res?.data?.data || res?.data || null;
         if (data) {
           setUser({ ...defaultProfile, ...data, uid: data._id || data.id, id: data._id || data.id, _id: data._id || data.id });
         } else {
           setUser(null);
-          sessionStorage.removeItem("token");
+          clearStoredAuth();
         }
       } catch (e) {
         setUser(null);
-        sessionStorage.removeItem("token");
+        clearStoredAuth();
       } finally {
         setAuthReady(true);
       }
@@ -51,14 +81,14 @@ export const AuthProvider = ({ children }) => {
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    if (token) sessionStorage.setItem("token", token);
+    storeToken(token);
     if (u) {
       const uid = u.id || u._id;
       const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
       setUser(merged);
       return merged;
     }
-    const me = await API.get("/users/me");
+    const me = await API.get("/users/me", { timeout: AUTH_PROFILE_TIMEOUT_MS });
     const data = me?.data?.data || me?.data || null;
     const uid = data?._id || data?.id;
     const merged = { ...defaultProfile, ...data, uid, id: uid, _id: uid };
@@ -77,7 +107,7 @@ export const AuthProvider = ({ children }) => {
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    if (token) sessionStorage.setItem("token", token);
+    storeToken(token);
     const uid = u?.id || u?._id;
     const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
     setUser(merged);
@@ -93,7 +123,7 @@ export const AuthProvider = ({ children }) => {
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    if (token) sessionStorage.setItem("token", token);
+    storeToken(token);
     const uid = u?.id || u?._id;
     const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
     setUser(merged);
@@ -101,7 +131,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    sessionStorage.removeItem("token");
+    clearStoredAuth();
     setUser(null);
   };
 
@@ -111,7 +141,7 @@ export const AuthProvider = ({ children }) => {
 
   const refreshProfile = async () => {
     try {
-      const res = await API.get("/users/me");
+      const res = await API.get("/users/me", { timeout: AUTH_PROFILE_TIMEOUT_MS });
       const data = res?.data?.data || res?.data || null;
       const uid = data?._id || data?.id;
       setUser({ ...defaultProfile, ...data, uid, id: uid, _id: uid });

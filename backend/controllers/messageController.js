@@ -19,6 +19,19 @@ function participantKey(myId, otherId) {
   return [String(myId), String(otherId)].sort().join("_");
 }
 
+const getEntityId = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") return String(value._id || value.id || value.uid || "").trim();
+  return String(value || "").trim();
+};
+
+const isInvalidParticipantId = (value) =>
+  !value ||
+  value === "[object Object]" ||
+  value === "{}" ||
+  value.length < 8;
+
 const withTimeout = (promise, timeoutMs, message) =>
   new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
@@ -72,13 +85,18 @@ const buildMeta = ({ degraded = false, reason = null, message = null, cache = "n
   ...(debug ? { debug } : {}),
 });
 
-const buildUserLookupMap = async (ids = []) => {
+const buildUserLookupMap = async (ids = [], timeoutMs = MESSAGES_QUERY_TIMEOUT_MS) => {
   const normalizedIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
   if (!normalizedIds.length) return new Map();
 
-  const users = await User.find({ _id: { $in: normalizedIds } })
-    .select("name email profilePhoto")
-    .lean();
+  const users = await withTimeout(
+    User.find({ _id: { $in: normalizedIds } })
+      .select("name email role")
+      .maxTimeMS(Math.max(250, timeoutMs))
+      .lean(),
+    timeoutMs,
+    `Message user lookup exceeded ${timeoutMs}ms`
+  );
 
   return new Map(
     users.map((user) => [String(user._id), { _id: user._id, id: user._id, ...user }])
@@ -97,7 +115,7 @@ const fetchConversationsPayload = async (currentId, timeoutMs = MESSAGES_QUERY_T
   const otherIds = conversations
     .map((conv) => (conv.participants || []).find((p) => String(p) !== currentId))
     .filter(Boolean);
-  const usersById = await buildUserLookupMap(otherIds);
+  const usersById = await buildUserLookupMap(otherIds, timeoutMs);
 
   return conversations.map((conv) => {
     const otherId = (conv.participants || []).find((p) => String(p) !== currentId);
@@ -144,7 +162,7 @@ const fetchMessagesPayload = async (conversationId, currentId, timeoutMs = MESSA
     `Messages query exceeded ${timeoutMs}ms`
   );
 
-  const sendersById = await buildUserLookupMap(messages.map((message) => message.senderId));
+  const sendersById = await buildUserLookupMap(messages.map((message) => message.senderId), timeoutMs);
   return messages.map((m) => {
     const sender = sendersById.get(String(m.senderId));
     return {
@@ -284,9 +302,12 @@ exports.getMessages = asyncHandler(async (req, res) => {
 
 exports.getOrCreateConversation = asyncHandler(async (req, res) => {
   const myId = String(req.user.id);
-  const otherId = (req.params.otherId || req.query.otherId || "").trim();
+  const otherId = getEntityId(req.params.otherId || req.query.otherId || "");
   if (!otherId) {
     return res.status(400).json({ message: "otherId is required (query or param)" });
+  }
+  if (isInvalidParticipantId(otherId)) {
+    return res.status(400).json({ message: "Invalid recipient id" });
   }
   const key = participantKey(myId, otherId);
   if (!key) {
@@ -302,18 +323,23 @@ exports.getOrCreateConversation = asyncHandler(async (req, res) => {
     });
     conv = conv.toObject ? conv.toObject() : conv;
   }
-  res.json({ success: true, data: { ...conv, id: conv._id, _id: conv._id } });
+  const otherUserMap = await buildUserLookupMap([otherId], MESSAGES_QUERY_TIMEOUT_MS);
+  res.json({
+    success: true,
+    data: {
+      ...conv,
+      id: conv._id,
+      _id: conv._id,
+      otherUser: otherUserMap.get(String(otherId)) || { _id: otherId, id: otherId, name: "Unknown" },
+    }
+  });
 });
 
 exports.sendMessage = asyncHandler(async (req, res) => {
   const { recipientId: rawRecipientId, text, conversationId: bodyConvId, bookingId } = req.body;
   const senderId = req.user?.id != null ? String(req.user.id) : null;
   const recipientId =
-    rawRecipientId != null && typeof rawRecipientId === "string"
-      ? rawRecipientId.trim()
-      : rawRecipientId != null && typeof rawRecipientId === "object" && rawRecipientId.toString
-        ? String(rawRecipientId.toString())
-        : null;
+    rawRecipientId != null ? getEntityId(rawRecipientId) : null;
 
   if (!senderId) {
     return res.status(401).json({ message: "Authentication required" });
@@ -338,6 +364,9 @@ exports.sendMessage = asyncHandler(async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
   } else if (recipientId) {
+    if (isInvalidParticipantId(recipientId)) {
+      return res.status(400).json({ message: "Invalid recipient id" });
+    }
     const key = participantKey(senderId, recipientId);
     if (!key) {
       return res.status(400).json({ message: "Invalid recipient" });
@@ -369,12 +398,6 @@ exports.sendMessage = asyncHandler(async (req, res) => {
 
   const populated = await Message.findById(message._id).lean();
   clearMessageCaches(conversation._id, conversation.participants || []);
-  setCacheEntry(messagesCache, `messages:${String(conversation._id)}`, [
-    ...((getCacheEntry(messagesCache, `messages:${String(conversation._id)}`)?.payload || []).filter(
-      (entry) => String(entry?._id) !== String(populated?._id)
-    )),
-    populated,
-  ]);
 
   const io = req.app.get("io");
   if (io) {

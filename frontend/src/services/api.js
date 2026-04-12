@@ -1,6 +1,7 @@
 import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+const DEFAULT_GET_TIMEOUT_MS = 1000;
 
 const API = axios.create({
   baseURL: API_BASE_URL,
@@ -23,6 +24,10 @@ async function getToken() {
 }
 
 API.interceptors.request.use(async (req) => {
+  const method = String(req?.method || "get").toLowerCase();
+  if (method === "get" && !Number.isFinite(Number(req.timeout))) {
+    req.timeout = DEFAULT_GET_TIMEOUT_MS;
+  }
   if (isPublicGetRequest(req)) return req;
   const token = await getToken();
   if (token) req.headers.Authorization = `Bearer ${token}`;

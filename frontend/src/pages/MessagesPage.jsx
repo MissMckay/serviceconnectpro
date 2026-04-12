@@ -8,6 +8,13 @@ import {
   getOrCreateConversation,
 } from "../firebase/firestoreServices";
 
+const getEntityId = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") return String(value._id || value.id || value.uid || "").trim();
+  return String(value || "").trim();
+};
+
 export default function MessagesPage() {
   const location = useLocation();
   const { user } = useContext(AuthContext);
@@ -16,6 +23,7 @@ export default function MessagesPage() {
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [compose, setCompose] = useState(null);
+  const [pendingRecipient, setPendingRecipient] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -26,12 +34,17 @@ export default function MessagesPage() {
   const selectedConversation = conversations.find((c) => String(c._id) === String(selected?.id));
   const otherUser =
     selectedConversation?.otherUser ||
+    pendingRecipient ||
     (compose ? { _id: compose.recipientId, name: compose.recipientName } : null);
 
   useEffect(() => {
     const state = location.state;
     if (state?.recipientId && state?.recipientName) {
-      setCompose({ recipientId: state.recipientId, recipientName: state.recipientName });
+      const recipientId = getEntityId(state.recipientId);
+      if (!recipientId) return;
+      const nextRecipient = { _id: recipientId, recipientId, name: state.recipientName, recipientName: state.recipientName };
+      setPendingRecipient(nextRecipient);
+      setCompose({ recipientId, recipientName: state.recipientName });
       if (typeof window.history.replaceState === "function") {
         window.history.replaceState({}, "", location.pathname);
       }
@@ -94,6 +107,7 @@ export default function MessagesPage() {
       );
       if (match) {
         setSelected({ id: match._id });
+        setPendingRecipient(match.otherUser || null);
         setCompose(null);
       }
     }
@@ -104,7 +118,9 @@ export default function MessagesPage() {
       setMessages([]);
       return;
     }
-    const unsub = subscribeMessages(selected.id, setMessages);
+    const unsub = subscribeMessages(selected.id, (list) => {
+      setMessages(Array.isArray(list) ? list : []);
+    });
     return () => {
       if (typeof unsub === "function") unsub();
     };
@@ -118,7 +134,7 @@ export default function MessagesPage() {
     e.preventDefault();
     const text = input.trim();
     const rawRecipient = otherUser?._id || compose?.recipientId || selectedConversation?.otherUser?._id;
-    const recipientId = rawRecipient != null ? String(rawRecipient) : null;
+    const recipientId = getEntityId(rawRecipient);
     if (!text || sending || !currentUserId) return;
 
     const optimisticId = `temp-${Date.now()}`;
@@ -141,6 +157,7 @@ export default function MessagesPage() {
         const conv = await getOrCreateConversation(currentUserId, recipientId);
         convId = conv._id;
         setSelected({ id: convId });
+        if (conv?.otherUser) setPendingRecipient(conv.otherUser);
         setCompose(null);
       }
       if (convId || recipientId) {

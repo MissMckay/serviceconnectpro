@@ -301,7 +301,8 @@ const ProviderDashboard = () => {
     }
     const unsubBookings = subscribeBookingsByProvider(providerId, setBookings);
     const unsubServices = subscribeServices({ providerId }, setServices, {
-      pollMs: 0
+      pollMs: 0,
+      limit: 50
     });
     return () => {
       if (typeof unsubBookings === "function") unsubBookings();
@@ -949,6 +950,7 @@ const ProviderDashboard = () => {
                                 onClick={() =>
                                   navigate("/messages", {
                                     state: {
+                                      fromRole: "provider",
                                       recipientId: getEntityId(booking?.userId) || getEntityId(booking?.user) || "",
                                       recipientName: booking?.userId?.name || booking?.user?.name || booking?.userId?.email || booking?.user?.email || "Customer"
                                     }
@@ -1298,6 +1300,7 @@ const ProviderDashboard = () => {
                                   onClick={() =>
                                     navigate("/messages", {
                                       state: {
+                                        fromRole: "provider",
                                         recipientId: getEntityId(booking?.userId) || getEntityId(booking?.user) || "",
                                         recipientName: booking.userId?.name || booking.user?.name || booking.userId?.email || booking.user?.email || "Customer"
                                       }

@@ -18,6 +18,7 @@ const ServiceDetails = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
   const initialService = state?.service || null;
+  const shouldForceFullMedia = state?.showAllMedia === true;
 
   const [service, setService] = useState(initialService);
   const [reviews, setReviews] = useState([]);
@@ -93,7 +94,10 @@ const ServiceDetails = () => {
     setError("");
     try {
       const [serviceData, serviceReviews] = await Promise.all([
-        getServiceById(id),
+        getServiceById(id, {
+          forceFresh: shouldForceFullMedia,
+          timeoutMs: 5000,
+        }),
         getReviewsByService(id)
       ]);
       setService((prev) => serviceData || prev || null);
@@ -107,7 +111,7 @@ const ServiceDetails = () => {
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, [id]);
+  }, [id, shouldForceFullMedia]);
 
   useEffect(() => {
     fetchServiceDetails(!initialService);

@@ -39,6 +39,7 @@ const IMAGE_FIELD_NAMES = [
 const MAX_SERVICE_IMAGES = 7;
 const MAX_SERVICE_IMAGE_BYTES = 550 * 1024;
 const MAX_THUMBNAIL_BYTES = 180 * 1024;
+const MAX_PROVIDER_AVATAR_BYTES = 80 * 1024;
 
 const isImageObject = (value) =>
   Boolean(
@@ -124,6 +125,73 @@ const sanitizeThumbnailUrl = (value) => {
   }
   return trimmed;
 };
+
+const sanitizeProviderAvatarUrl = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:") && getStringByteLength(trimmed) > MAX_PROVIDER_AVATAR_BYTES) {
+    return "";
+  }
+  return trimmed;
+};
+
+const hydrateProviderAvatars = async (services = [], timeoutMs = 600) => {
+  const providerIds = [
+    ...new Set(
+      services
+        .map((service) => String(service?.providerId || "").trim())
+        .filter((providerId) => providerId && mongoose.Types.ObjectId.isValid(providerId))
+    ),
+  ];
+
+  if (!providerIds.length) {
+    return services.map((service) => ({
+      ...service,
+      providerProfilePhoto: sanitizeProviderAvatarUrl(service?.providerProfilePhoto),
+    }));
+  }
+
+  try {
+    const providers = await withTimeout(
+      User.find({ _id: { $in: providerIds } })
+        .select("_id profilePhoto")
+        .maxTimeMS(Math.max(250, timeoutMs))
+        .lean(),
+      timeoutMs,
+      `Provider avatar lookup exceeded ${timeoutMs}ms`
+    );
+    const avatarByProviderId = new Map(
+      providers.map((provider) => [
+        String(provider._id),
+        sanitizeProviderAvatarUrl(provider.profilePhoto),
+      ])
+    );
+
+    return services.map((service) => ({
+      ...service,
+      providerProfilePhoto:
+        sanitizeProviderAvatarUrl(service?.providerProfilePhoto) ||
+        avatarByProviderId.get(String(service?.providerId || "")) ||
+        "",
+    }));
+  } catch (_) {
+    return services.map((service) => ({
+      ...service,
+      providerProfilePhoto: sanitizeProviderAvatarUrl(service?.providerProfilePhoto),
+    }));
+  }
+};
+
+const normalizeServiceCardPayload = async (services = [], timeoutMs = 600) =>
+  hydrateProviderAvatars(
+    services.map((service) => ({
+      ...service,
+      thumbnailUrl: sanitizeThumbnailUrl(service?.thumbnailUrl),
+      providerProfilePhoto: sanitizeProviderAvatarUrl(service?.providerProfilePhoto),
+    })),
+    timeoutMs
+  );
 
 const validateNormalizedImages = (images = []) => {
   images.forEach((image, index) => {
@@ -403,7 +471,7 @@ const fetchServicesPage = async ({
   const hasMore = rawServices.length > limit;
   const list = rawServices.slice(0, limit);
 
-  const services = list;
+  const services = await normalizeServiceCardPayload(list, Math.min(timeoutMs, 600));
 
   const totalPages = hasMore ? page + 1 : page;
   const total = (page - 1) * limit + services.length + (hasMore ? 1 : 0);
@@ -462,7 +530,11 @@ const fetchServiceDetail = async (id, timeoutMs = 4000) =>
       .lean(),
     timeoutMs,
     `Service detail query exceeded ${timeoutMs}ms`
-  );
+  ).then(async (service) => {
+    if (!service) return service;
+    const [normalized] = await normalizeServiceCardPayload([service], Math.min(timeoutMs, 600));
+    return normalized;
+  });
 
 exports.getAllServices = asyncHandler(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);

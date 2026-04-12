@@ -1,4 +1,5 @@
 const BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+const DEFAULT_GET_TIMEOUT_MS = 1000;
 
 async function getToken() {
   return sessionStorage.getItem("token");
@@ -7,16 +8,45 @@ async function getToken() {
 export async function apiRequest(path, options = {}) {
   const token = await getToken();
   const url = path.startsWith("http") ? path : `${BASE_URL.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+  const method = String(options.method || "GET").toUpperCase();
+  const timeoutMs =
+    Number.isFinite(Number(options.timeoutMs))
+      ? Math.max(0, Number(options.timeoutMs))
+      : method === "GET"
+        ? DEFAULT_GET_TIMEOUT_MS
+        : 0;
+  const { timeoutMs: _timeoutMs, ...fetchOptions } = options;
   const headers = {
     "Content-Type": "application/json",
-    ...options.headers,
+    ...fetchOptions.headers,
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const controller =
+    timeoutMs > 0 && !fetchOptions.signal ? new AbortController() : null;
+  const timeoutId = controller
+    ? globalThis.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  let res;
+  try {
+    res = await fetch(url, {
+      ...fetchOptions,
+      headers,
+      signal: controller?.signal || fetchOptions.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const err = new Error(`Request took longer than ${timeoutMs}ms`);
+      err.status = 408;
+      err.code = "REQUEST_TIMEOUT";
+      throw err;
+    }
+    throw error;
+  } finally {
+    if (timeoutId != null) globalThis.clearTimeout(timeoutId);
+  }
+
   const text = await res.text();
   let data;
   try {
@@ -34,11 +64,11 @@ export async function apiRequest(path, options = {}) {
 }
 
 export const api = {
-  get: (path) => apiRequest(path, { method: "GET" }),
-  post: (path, body) => apiRequest(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
-  patch: (path, body) => apiRequest(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
-  put: (path, body) => apiRequest(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
-  delete: (path) => apiRequest(path, { method: "DELETE" }),
+  get: (path, options = {}) => apiRequest(path, { method: "GET", ...options }),
+  post: (path, body, options = {}) => apiRequest(path, { method: "POST", body: body ? JSON.stringify(body) : undefined, ...options }),
+  patch: (path, body, options = {}) => apiRequest(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined, ...options }),
+  put: (path, body, options = {}) => apiRequest(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined, ...options }),
+  delete: (path, options = {}) => apiRequest(path, { method: "DELETE", ...options }),
 };
 
 export default api;

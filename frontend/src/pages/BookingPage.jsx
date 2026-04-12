@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { getServiceById, getReviewsByService, createBooking } from "../firebase/firestoreServices";
 import { formatStars } from "../utils/rating";
 import { formatLrdPrice } from "../utils/currency";
-import { getServiceMedia } from "../utils/serviceMedia";
+import { getMarketplaceCardMedia, getServiceMedia } from "../utils/serviceMedia";
 import { AuthContext } from "../context/AuthContext";
 
 const getProviderLocation = (service) =>
@@ -34,7 +34,10 @@ const BookingPage = () => {
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const media = useMemo(() => getServiceMedia(service || {}), [service]);
-  const firstImage = media[0]?.url;
+  const { serviceImageUrl: firstImage, providerPhotoUrl: providerPhoto } = useMemo(
+    () => getMarketplaceCardMedia(service || {}),
+    [service]
+  );
 
   const timeOptions = [
     "09:00 AM",
@@ -171,7 +174,16 @@ const BookingPage = () => {
                 <p className="booking-desc">{serviceDescription}</p>
                 <dl className="booking-detail-list">
                   <dt>Provider</dt>
-                  <dd>{providerName}</dd>
+                  <dd>
+                    <span className="booking-provider-chip">
+                      {providerPhoto ? (
+                        <img src={providerPhoto} alt={providerName} />
+                      ) : (
+                        <span>{String(providerName || "?").trim().slice(0, 2).toUpperCase() || "?"}</span>
+                      )}
+                      {providerName}
+                    </span>
+                  </dd>
                   {location && (
                     <>
                       <dt>Location</dt>

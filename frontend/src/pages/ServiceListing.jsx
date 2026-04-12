@@ -7,14 +7,13 @@ import {
   getUserProfile,
 } from "../firebase/firestoreServices";
 import { formatStars, getAverageRatingAndCount } from "../utils/rating";
-import { getFirstServiceImageUrl } from "../utils/serviceMedia";
+import { getMarketplaceCardMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import {
   getServiceSearchLocations,
   matchesLocationQuery,
 } from "../utils/serviceSearch";
 import {
-  getLiveProviderPhoto,
   getServiceProviderId,
   serviceHasProviderSummary,
 } from "../utils/providerProfile";
@@ -58,7 +57,7 @@ const ServiceListing = () => {
         setServices(list);
         setError("");
         setIsLoading(false);
-      }, { pollMs: 0 });
+      }, { pollMs: 0, limit: 24 });
     } catch (err) {
       setServices([]);
       setError(err?.message || "Failed to load services.");
@@ -77,9 +76,9 @@ const ServiceListing = () => {
         !providerProfiles[getServiceProviderId(service)] &&
         (
           !serviceHasProviderSummary(service) ||
-          !getLiveProviderPhoto(service, providerProfiles)
+          !getMarketplaceCardMedia(service, providerProfiles).providerPhotoUrl
         )
-    );
+    ).slice(0, 12);
 
     if (!providersNeedingHydration.length) return undefined;
 
@@ -715,9 +714,8 @@ const ServiceListing = () => {
             const isAvailable =
               (hydratedService?.availabilityStatus || "").toLowerCase() === "available";
 
-            const providerPhoto = getLiveProviderPhoto(hydratedService, providerProfiles);
-            const firstImageUrl = getFirstServiceImageUrl(hydratedService);
-            const cardImageUrl = firstImageUrl || providerPhoto || "";
+            const { serviceImageUrl: cardImageUrl, providerPhotoUrl: providerPhoto, mediaCount } =
+              getMarketplaceCardMedia(hydratedService, providerProfiles);
 
             const createdAtTime =
               hydratedService?.createdAt instanceof Date
@@ -770,6 +768,11 @@ const ServiceListing = () => {
                   <div className="sc-card__image-overlay" />
 
                   <div className="sc-card__image-badges">
+                    {mediaCount > 1 && (
+                      <span className="sc-card__image-badge">
+                        {mediaCount} photos
+                      </span>
+                    )}
                     {isFresh && (
                       <span className="sc-card__image-badge sc-card__image-badge--fresh">
                         New
