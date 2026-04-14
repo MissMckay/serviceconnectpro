@@ -14,8 +14,22 @@ const getSettingsPath = (role) => {
   const r = String(role || "").toLowerCase();
   if (r === "provider") return "/provider?view=settings";
   if (r === "user") return "/user?view=profile";
-  if (r === "admin") return "/admin";
+  if (r === "admin") return "";
   return "/";
+};
+
+const getDashboardPath = (role) => {
+  const r = String(role || "").toLowerCase();
+  if (r === "provider") return "/provider?view=dashboard";
+  if (r === "user") return "/user";
+  if (r === "admin") return "/admin?view=overview";
+  return "/";
+};
+
+const getLogoutPath = (role) => {
+  const r = String(role || "").toLowerCase();
+  if (r === "admin") return "/admin-login";
+  return "/login";
 };
 
 export default function TopbarUserMenu({ variant = "default", className = "" }) {
@@ -29,6 +43,8 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
   const name = user?.name || user?.email || "User";
   const initials = getInitials(name);
   const settingsPath = getSettingsPath(role);
+  const dashboardPath = getDashboardPath(role);
+  const logoutPath = getLogoutPath(role);
 
   useEffect(() => {
     if (!open) return;
@@ -42,7 +58,7 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
   const handleLogout = async () => {
     setOpen(false);
     await logout();
-    navigate("/login");
+    navigate(logoutPath, { replace: true });
   };
 
   const isProtected = variant === "protected";
@@ -75,9 +91,9 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
             <span className="topbar-user-menu-name">{name}</span>
             <span className="topbar-user-menu-role">{role || "User"}</span>
           </div>
-          {role === "user" && (
+          {dashboardPath && (
             <Link
-              to="/user"
+              to={dashboardPath}
               className="topbar-user-menu-item"
               role="menuitem"
               onClick={() => setOpen(false)}
@@ -85,14 +101,16 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
               Dashboard
             </Link>
           )}
-          <Link
-            to={settingsPath}
-            className="topbar-user-menu-item"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-          >
-            Settings
-          </Link>
+          {settingsPath && (
+            <Link
+              to={settingsPath}
+              className="topbar-user-menu-item"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              Settings
+            </Link>
+          )}
           <button
             type="button"
             className="topbar-user-menu-item topbar-user-menu-item-logout"

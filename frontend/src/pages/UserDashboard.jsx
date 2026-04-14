@@ -10,6 +10,7 @@ import { getServiceSearchLocations, matchesLocationQuery } from "../utils/servic
 import { getEntityId, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
 import { prepareProfilePhotoUpload } from "../utils/imageUpload";
 import WhatsAppIcon from "../components/WhatsAppIcon";
+import TopbarUserMenu from "../components/TopbarUserMenu";
 import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
 const NEW_SERVICE_WINDOW_HOURS = 42;
@@ -765,15 +766,7 @@ const UserDashboard = () => {
                 <span className="provider-profile-photo-label">Profile photo</span>
                 <p className="profile-photo-detail">This photo appears in the top navigation bar.</p>
                 <div className="provider-profile-photo-box">
-                  <div className="provider-profile-photo-preview">
-                    {(profileData || user)?.profilePhoto ? (
-                      <img src={(profileData || user).profilePhoto} alt="Profile" />
-                    ) : (
-                      <span className="provider-profile-photo-placeholder">
-                        {String((profileData || user)?.name || "U").trim().slice(0, 2).toUpperCase() || "?"}
-                      </span>
-                    )}
-                  </div>
+                  <TopbarUserMenu variant="protected" className="profile-photo-menu" />
                   <div className="provider-profile-photo-actions">
                     <label className="provider-profile-photo-btn provider-profile-photo-upload">
                       Change photo

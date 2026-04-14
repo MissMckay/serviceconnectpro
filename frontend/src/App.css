@@ -261,6 +261,8 @@
   top: calc(100% + 8px);
   right: 0;
   min-width: 200px;
+  width: min(240px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -268,6 +270,7 @@
   padding: 8px 0;
   z-index: 1000;
   animation: topbar-dropdown-in 0.15s ease-out;
+  overflow: hidden;
 }
 
 @keyframes topbar-dropdown-in {
@@ -340,6 +343,44 @@
   color: var(--brand-blue);
 }
 .topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-role {
+  color: var(--text-muted);
+}
+
+.profile-photo-menu {
+  align-self: flex-start;
+}
+
+.provider-profile-photo-box .profile-photo-menu .topbar-user-menu-trigger,
+.provider-profile-view .profile-photo-menu .topbar-user-menu-trigger {
+  padding: 0;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+}
+
+.provider-profile-photo-box .profile-photo-menu .topbar-user-menu-trigger:hover,
+.provider-profile-view .profile-photo-menu .topbar-user-menu-trigger:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+.provider-profile-photo-box .profile-photo-menu .topbar-user-menu-avatar,
+.provider-profile-view .profile-photo-menu .topbar-user-menu-avatar {
+  width: 84px;
+  height: 84px;
+  border-width: 1px;
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #eef2ff;
+}
+
+.provider-profile-photo-box .profile-photo-menu .topbar-user-menu-initials,
+.provider-profile-view .profile-photo-menu .topbar-user-menu-initials {
+  color: var(--brand-blue);
+  font-size: 1.1rem;
+}
+
+.provider-profile-photo-box .profile-photo-menu .topbar-user-menu-chevron,
+.provider-profile-view .profile-photo-menu .topbar-user-menu-chevron {
   color: var(--text-muted);
 }
 
