@@ -4,7 +4,7 @@ const POLL_MS = 10000;
 const CACHE_TTL_MS = 15000;
 const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
 const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
-const PUBLIC_SERVICES_TIMEOUT_MS = 3000;
+const PUBLIC_SERVICES_TIMEOUT_MS = 12000;
 const MAX_SERVICE_IMAGE_COUNT = 7;
 const MAX_PROVIDER_AVATAR_BYTES = 80 * 1024;
 const responseCache = new Map();
@@ -13,6 +13,11 @@ let publicDataPrewarmPromise = null;
 let publicServicesSnapshotMemory = [];
 
 function noopUnsub() {}
+
+function notifyBookingsUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("bookings:updated"));
+}
 
 function createWindowAwarePoller(fetcher, pollMs) {
   const canListen =
@@ -622,7 +627,22 @@ export function subscribeBookingsByUser(userId, setData) {
       if (setData) setData([]);
     }
   };
-  return createWindowAwarePoller(fetchList, POLL_MS);
+  const canListenForRefresh = typeof window !== "undefined";
+  const handleRefresh = () => {
+    fetchList();
+  };
+
+  if (canListenForRefresh) {
+    window.addEventListener("bookings:updated", handleRefresh);
+  }
+
+  const cleanupPolling = createWindowAwarePoller(fetchList, POLL_MS);
+
+  return () => {
+    cleanupPolling();
+    if (!canListenForRefresh) return;
+    window.removeEventListener("bookings:updated", handleRefresh);
+  };
 }
 
 export async function getBookingsByProvider(providerId) {
@@ -650,7 +670,22 @@ export function subscribeBookingsByProvider(providerId, setData) {
       if (setData) setData([]);
     }
   };
-  return createWindowAwarePoller(fetchList, POLL_MS);
+  const canListenForRefresh = typeof window !== "undefined";
+  const handleRefresh = () => {
+    fetchList();
+  };
+
+  if (canListenForRefresh) {
+    window.addEventListener("bookings:updated", handleRefresh);
+  }
+
+  const cleanupPolling = createWindowAwarePoller(fetchList, POLL_MS);
+
+  return () => {
+    cleanupPolling();
+    if (!canListenForRefresh) return;
+    window.removeEventListener("bookings:updated", handleRefresh);
+  };
 }
 
 export async function createBooking(userId, data) {
@@ -658,20 +693,25 @@ export async function createBooking(userId, data) {
     serviceId: data.serviceId,
     bookingDate: data.bookingDate instanceof Date ? data.bookingDate.toISOString() : data.bookingDate,
   });
+  notifyBookingsUpdated();
   const b = res?.data ?? res;
-  return b._id || b.id;
+  const booking = b?.data ?? b;
+  return booking?._id || booking?.id || null;
 }
 
 export async function updateBookingStatus(bookingId, status) {
   await api.put(`bookings/${bookingId}`, { status });
+  notifyBookingsUpdated();
 }
 
 export async function cancelBooking(bookingId) {
   await api.put(`bookings/cancel/${bookingId}`, {});
+  notifyBookingsUpdated();
 }
 
 export async function deleteBooking(bookingId) {
   await api.delete(`bookings/${bookingId}`);
+  notifyBookingsUpdated();
 }
 
 export async function getBookingById(bookingId) {

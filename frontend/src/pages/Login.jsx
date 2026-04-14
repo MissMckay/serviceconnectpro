@@ -26,8 +26,6 @@ const Login = () => {
       const loggedInUser = await login({ email, password });
       const role = String(loggedInUser?.role || "user").toLowerCase();
 
-      alert("Login Successful!");
-
       if (role === "admin") navigate("/admin", { replace: true });
       else if (role === "provider") navigate("/provider", { replace: true });
       else navigate("/user", { replace: true });

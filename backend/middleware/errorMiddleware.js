@@ -15,7 +15,7 @@ const errorHandler = (err, req, res, next) => {
   const logLabel = statusCode >= 500 ? "ERROR" : "WARN";
   const logMessage = `${req.method} ${req.originalUrl} -> ${statusCode} ${message}`;
 
-  if (isMongoUnavailable) {
+  if (isMongoUnavailable && !connectDB.isConnected()) {
     connectDB.scheduleReconnect("error-middleware");
   }
 

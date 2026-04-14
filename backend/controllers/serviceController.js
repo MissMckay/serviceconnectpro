@@ -271,7 +271,7 @@ exports.createService = asyncHandler(async (req, res) => {
     if (!connectDB.isMongoConnectionError(error)) {
       throw error;
     }
-    await connectDB.forceReconnect("createService-save");
+    await connectDB.ensureConnected();
     service = await Service.create(servicePayload);
   }
 
@@ -290,8 +290,8 @@ const serviceDetailCache = new Map();
 const serviceDetailRefreshPromises = new Map();
 const LIST_CACHE_TTL_MS = getIntEnv("SERVICES_LIST_CACHE_TTL_MS", 5000);
 const LIST_CACHE_STALE_TTL_MS = getIntEnv("SERVICES_LIST_CACHE_STALE_TTL_MS", 60000);
-const SERVICES_QUERY_TIMEOUT_MS = getIntEnv("SERVICES_QUERY_TIMEOUT_MS", 3000);
-const SERVICES_REFRESH_TIMEOUT_MS = getIntEnv("SERVICES_REFRESH_TIMEOUT_MS", 900);
+const SERVICES_QUERY_TIMEOUT_MS = getIntEnv("SERVICES_QUERY_TIMEOUT_MS", 6000);
+const SERVICES_REFRESH_TIMEOUT_MS = getIntEnv("SERVICES_REFRESH_TIMEOUT_MS", 1500);
 const MONGO_CONNECTED_STATE = 1;
 
 const getCacheKey = (page, limit, category, minPrice, maxPrice, location = "", providerId = "") =>
@@ -503,7 +503,7 @@ const refreshServicesCache = async (cacheKey, params, cachedPayload) => {
       return payload;
     })
     .catch((error) => {
-      if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+      if (connectDB.isMongoConnectionError(error)) {
         connectDB.scheduleReconnect("getAllServices-refresh-failed");
       }
 
@@ -639,7 +639,7 @@ exports.getAllServices = asyncHandler(async (req, res) => {
       )
     );
   } catch (err) {
-    if (connectDB.isMongoConnectionError(err) || err?.code === "SERVICES_QUERY_TIMEOUT") {
+    if (connectDB.isMongoConnectionError(err)) {
       connectDB.scheduleReconnect("getAllServices-query-failed");
     }
     // If we have any cached payload (even expired), return it so the UI loads fast during brief Atlas hiccups.
@@ -691,7 +691,7 @@ exports.getServiceById = asyncHandler(async (req, res) => {
           return service;
         })
         .catch((error) => {
-          if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+          if (connectDB.isMongoConnectionError(error)) {
             connectDB.scheduleReconnect("getServiceById-refresh-failed");
           }
           return cached.payload;
@@ -724,8 +724,10 @@ exports.getServiceById = asyncHandler(async (req, res) => {
       meta: buildServicesMeta({ cache: "refresh" }),
     });
   } catch (error) {
-    if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
+    if (connectDB.isMongoConnectionError(error)) {
       connectDB.scheduleReconnect("getServiceById-query-failed");
+    }
+    if (connectDB.isMongoConnectionError(error) || error?.code === "SERVICES_QUERY_TIMEOUT") {
       return res.status(200).json({
         success: true,
         data: cached?.payload || null,
@@ -795,7 +797,7 @@ exports.updateService = asyncHandler(async (req, res) => {
       throw error;
     }
 
-    await connectDB.forceReconnect("updateService-save");
+    await connectDB.ensureConnected();
 
     const retryService = await Service.findById(id);
     if (!retryService) {

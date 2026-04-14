@@ -11,7 +11,9 @@ const router = express.Router();
 
 const handleRouteError = (res, error) => {
   if (connectDB.isMongoConnectionError(error)) {
-    connectDB.scheduleReconnect("auth-route-error");
+    if (!connectDB.isConnected()) {
+      connectDB.scheduleReconnect("auth-route-error");
+    }
     return res.status(503).json({ message: "Database temporarily unavailable. Please try again." });
   }
 

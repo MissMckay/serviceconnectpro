@@ -16,7 +16,7 @@ const updateServiceRatingSummary = async (serviceId, payload, reason) => {
       throw error;
     }
 
-    await connectDB.forceReconnect(reason);
+    await connectDB.ensureConnected();
     await Service.findByIdAndUpdate(serviceId, payload);
   }
 };

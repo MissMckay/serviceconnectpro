@@ -78,9 +78,9 @@ const getMongoUriConfig = () => {
 };
 
 const buildConnectionOptions = (dbName) => ({
-  serverSelectionTimeoutMS: getIntEnv("MONGO_SERVER_SELECTION_TIMEOUT_MS", 4000),
-  connectTimeoutMS: getIntEnv("MONGO_CONNECT_TIMEOUT_MS", 4000),
-  socketTimeoutMS: getIntEnv("MONGO_SOCKET_TIMEOUT_MS", 12000),
+  serverSelectionTimeoutMS: getIntEnv("MONGO_SERVER_SELECTION_TIMEOUT_MS", 10000),
+  connectTimeoutMS: getIntEnv("MONGO_CONNECT_TIMEOUT_MS", 10000),
+  socketTimeoutMS: getIntEnv("MONGO_SOCKET_TIMEOUT_MS", 20000),
   heartbeatFrequencyMS: getIntEnv("MONGO_HEARTBEAT_FREQUENCY_MS", 10000),
   maxPoolSize: getIntEnv("MONGO_MAX_POOL_SIZE", 10),
   minPoolSize: getIntEnv("MONGO_MIN_POOL_SIZE", 1),
@@ -229,10 +229,13 @@ const logConnectionGuidance = (error, attempt, maxRetries, usingStandardUri) => 
 const verifyConnection = async () => {
   const maxAttempts = Math.max(1, getIntEnv("MONGO_VERIFY_RETRIES", 3));
   const retryDelayMs = Math.max(100, getIntEnv("MONGO_VERIFY_RETRY_DELAY_MS", 250));
+  const shouldVerifyWithPing = String(process.env.MONGO_VERIFY_WITH_PING || "").toLowerCase() === "true";
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const db = mongoose.connection?.db;
-    if (!db) {
+    const isConnected = mongoose.connection.readyState === CONNECTED_STATE;
+
+    if (!db || !isConnected) {
       if (attempt === maxAttempts) {
         const error = new Error("MongoDB connection is not ready yet.");
         error.name = "MongoNotConnectedError";
@@ -240,6 +243,10 @@ const verifyConnection = async () => {
       }
       await sleep(retryDelayMs);
       continue;
+    }
+
+    if (!shouldVerifyWithPing) {
+      return;
     }
 
     try {
@@ -372,5 +379,6 @@ connectDB.forceReconnect = forceReconnect;
 connectDB.scheduleReconnect = scheduleReconnect;
 connectDB.isMongoConnectionError = isMongoConnectionError;
 connectDB.getConnectionStatus = getConnectionStatus;
+connectDB.isConnected = () => mongoose.connection.readyState === CONNECTED_STATE;
 
 module.exports = connectDB;

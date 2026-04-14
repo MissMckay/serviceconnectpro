@@ -12,6 +12,9 @@ import { prepareProfilePhotoUpload } from "../utils/imageUpload";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
+const NEW_SERVICE_WINDOW_HOURS = 42;
+const NEW_SERVICE_WINDOW_MS = NEW_SERVICE_WINDOW_HOURS * 60 * 60 * 1000;
+
 const UserDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -411,7 +414,7 @@ const UserDashboard = () => {
           <>
             {!selectedService && (
               <>
-                <div className="admin-report-strip" style={{ marginBottom: "1.25rem" }}>
+                <div className="admin-report-strip user-dashboard-metrics" style={{ marginBottom: "1.25rem" }}>
                   <div className="admin-metric">
                     <p>Available Services</p>
                     <strong>{dashboardStats.availableServices}</strong>
@@ -486,6 +489,13 @@ const UserDashboard = () => {
                       const location = getServiceLocation(service) || getProviderAddress(service);
                       const locationDisplay = location && location !== "Not provided" ? location : "";
                       const isAvailable = (service?.availabilityStatus || "").toLowerCase() === "available";
+                      const createdAtTime =
+                        service?.createdAt instanceof Date
+                          ? service.createdAt.getTime()
+                          : new Date(service?.createdAt || 0).getTime();
+                      const isFresh =
+                        Number.isFinite(createdAtTime) &&
+                        createdAtTime >= Date.now() - NEW_SERVICE_WINDOW_MS;
                       return (
                         <article key={service._id} className="sc-card">
                           <div
@@ -523,11 +533,27 @@ const UserDashboard = () => {
                             <div className="sc-card__image-placeholder" style={{ display: firstImageUrl ? "none" : "flex" }}>
                               No photo
                             </div>
-                            {mediaCount > 1 && (
-                              <span className="sc-card__image-badge dashboard-card-photo-count">
-                                {mediaCount} photos
+                            <div className="sc-card__image-badges">
+                              {mediaCount > 1 && (
+                                <span className="sc-card__image-badge dashboard-card-photo-count">
+                                  {mediaCount} photos
+                                </span>
+                              )}
+                              {isFresh && (
+                                <span className="sc-card__image-badge sc-card__image-badge--fresh">
+                                  New
+                                </span>
+                              )}
+                              <span
+                                className={`sc-card__image-badge ${
+                                  isAvailable
+                                    ? "sc-card__image-badge--available"
+                                    : "sc-card__image-badge--unavailable"
+                                }`}
+                              >
+                                {service?.availabilityStatus || "—"}
                               </span>
-                            )}
+                            </div>
                             <span className="sc-card__provider-badge" title={providerName}>
                               {providerPhoto ? (
                                 <img src={providerPhoto} alt={providerName} className="sc-card__provider-avatar" />
@@ -540,9 +566,6 @@ const UserDashboard = () => {
                             <div className="sc-card__tags">
                               <span className="sc-card__tag sc-card__tag--category">
                                 {service?.category || "General"}
-                              </span>
-                              <span className={`sc-card__tag sc-card__tag--status ${isAvailable ? "sc-card__tag--available" : "sc-card__tag--unavailable"}`}>
-                                {service?.availabilityStatus || "—"}
                               </span>
                             </div>
                             <h3 className="sc-card__title">{service.serviceName}</h3>
@@ -578,18 +601,6 @@ const UserDashboard = () => {
                                 >
                                   View
                                 </button>
-                                <button
-                                  type="button"
-                                  className="sc-card__btn sc-card__btn--primary"
-                                  onClick={() => navigate(`/book/${service._id}`, { state: { service, from: "user-dashboard" } })}
-                                  onPointerDown={() => preloadBookingRoute(service._id)}
-                                  onTouchStart={() => preloadBookingRoute(service._id)}
-                                  onMouseEnter={() => preloadBookingRoute(service._id)}
-                                  onFocus={() => preloadBookingRoute(service._id)}
-                                  disabled={!isAvailable}
-                                >
-                                  Book
-                                </button>
                                 {getWhatsAppUrl(providerPhone) && (
                                   <a
                                     href={getWhatsAppUrl(providerPhone)}
@@ -602,6 +613,18 @@ const UserDashboard = () => {
                                     <WhatsAppIcon size={20} />
                                   </a>
                                 )}
+                                <button
+                                  type="button"
+                                  className="sc-card__btn sc-card__btn--primary"
+                                  onClick={() => navigate(`/book/${service._id}`, { state: { service, from: "user-dashboard" } })}
+                                  onPointerDown={() => preloadBookingRoute(service._id)}
+                                  onTouchStart={() => preloadBookingRoute(service._id)}
+                                  onMouseEnter={() => preloadBookingRoute(service._id)}
+                                  onFocus={() => preloadBookingRoute(service._id)}
+                                  disabled={!isAvailable}
+                                >
+                                  Book
+                                </button>
                               </div>
                             </div>
                           </div>

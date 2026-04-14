@@ -2950,12 +2950,30 @@
   gap: 10px;
 }
 
+.user-dashboard-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .admin-metric {
   position: relative;
   border: 1px solid #e5e9f2;
   border-radius: 12px;
   padding: 12px;
   background: #f9fbff;
+}
+
+.user-dashboard-metrics .admin-metric {
+  padding: 8px;
+}
+
+.user-dashboard-metrics .admin-metric p {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+}
+
+.user-dashboard-metrics .admin-metric strong {
+  font-size: 1rem;
 }
 
 .admin-metric-dropdown {
@@ -4755,6 +4773,10 @@
     grid-template-columns: 1fr;
   }
 
+  .user-dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .review-top-nav {
     padding: 0 14px;
   }
@@ -5150,7 +5172,7 @@
 }
 
 .sc-card__btn {
-  padding: 4px 7px;
+  padding: 8px 11px;
   font-size: 0.62rem;
   font-weight: 600;
   border-radius: 999px;
@@ -5947,13 +5969,13 @@
 
 .sc-card__btn {
   min-height: 28px;
-  padding: 4px 7px;
+  padding: 8px 11px;
   font-size: 0.68rem;
   font-weight: 800;
 }
 
 .sc-card__btn--secondary {
-  padding: 4px 6px;
+  padding: 8px 10px;
   font-size: 0.64rem;
   min-width: 24px;
   justify-content: center;
@@ -5961,6 +5983,10 @@
 
 .sc-card__actions .sc-card__btn {
   flex: 0 1 auto;
+}
+
+.sc-card__actions .sc-card__btn--primary {
+  margin-left: auto;
 }
 
 .sc-card__btn-icon {

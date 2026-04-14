@@ -24,6 +24,8 @@ import {
 } from "../utils/routePreload";
 
 const INITIAL_SKELETON_COUNT = 6;
+const NEW_SERVICE_WINDOW_HOURS = 42;
+const NEW_SERVICE_WINDOW_MS = NEW_SERVICE_WINDOW_HOURS * 60 * 60 * 1000;
 
 const ServiceListing = () => {
   const navigate = useNavigate();
@@ -254,7 +256,7 @@ const ServiceListing = () => {
     newestServicesCount,
   } = useMemo(() => {
     const now = Date.now();
-    const freshThreshold = now - 7 * 24 * 60 * 60 * 1000;
+    const freshThreshold = now - NEW_SERVICE_WINDOW_MS;
     const selectedCategory = appliedFilters.selectedCategory.toLowerCase();
     const minPrice = Number(appliedFilters.minPrice);
     const maxPrice = Number(appliedFilters.maxPrice);
@@ -424,7 +426,7 @@ const ServiceListing = () => {
       >
         <div className="services-summary-drawer__header">
           <div>
-            <p className="services-summary-drawer__eyebrow">Summary</p>
+            <p className="services-summary-drawer__eyebrow">Category</p>
             <h2 className="services-summary-drawer__title">
               Service categories
             </h2>
@@ -492,12 +494,12 @@ const ServiceListing = () => {
           type="button"
           className="services-toolbar__btn services-summary-trigger"
           onClick={() => setIsSummaryOpen(true)}
-          aria-label="Open services summary"
+          aria-label="Open service categories"
         >
           <span />
           <span />
           <span />
-          <strong>Summary</strong>
+          <strong>Category</strong>
         </button>
 
         <button
@@ -689,7 +691,6 @@ const ServiceListing = () => {
         <div className="services-results-bar__meta">
           <span>{availableServicesCount} available now</span>
           <span>{newestServicesCount} newest</span>
-          <span>Newest first</span>
         </div>
       </section>
       )}
@@ -757,7 +758,7 @@ const ServiceListing = () => {
 
             const isFresh =
               Number.isFinite(createdAtTime) &&
-              createdAtTime >= Date.now() - 7 * 24 * 60 * 60 * 1000;
+              createdAtTime >= Date.now() - NEW_SERVICE_WINDOW_MS;
 
             return (
               <article key={hydratedService._id} className="sc-card">
@@ -943,6 +944,19 @@ const ServiceListing = () => {
                         View
                       </button>
 
+                      {getWhatsAppUrl(providerPhone) && (
+                        <a
+                          href={getWhatsAppUrl(providerPhone)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="sc-card__whatsapp"
+                          title="Chat on WhatsApp"
+                          aria-label="Chat on WhatsApp"
+                        >
+                          <WhatsAppIcon size={20} />
+                        </a>
+                      )}
+
                       {(role === "user" || !role) && (
                         <button
                           type="button"
@@ -956,19 +970,6 @@ const ServiceListing = () => {
                         >
                           Book
                         </button>
-                      )}
-
-                      {getWhatsAppUrl(providerPhone) && (
-                        <a
-                          href={getWhatsAppUrl(providerPhone)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="sc-card__whatsapp"
-                          title="Chat on WhatsApp"
-                          aria-label="Chat on WhatsApp"
-                        >
-                          <WhatsAppIcon size={20} />
-                        </a>
                       )}
                     </div>
                   </div>

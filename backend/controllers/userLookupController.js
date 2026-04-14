@@ -5,8 +5,8 @@ const connectDB = require("../config/db");
 const PROFILE_PHOTO_MAX_BYTES = 180 * 1024;
 const USER_CACHE_TTL_MS = 30000;
 const USER_CACHE_STALE_TTL_MS = 5 * 60 * 1000;
-const USER_QUERY_TIMEOUT_MS = 2500;
-const USER_REFRESH_TIMEOUT_MS = 900;
+const USER_QUERY_TIMEOUT_MS = 5000;
+const USER_REFRESH_TIMEOUT_MS = 1500;
 
 const userCache = new Map();
 const userRefreshPromises = new Map();
@@ -85,7 +85,7 @@ const refreshUserCache = (cacheKey, userId, cachedPayload) => {
       return user;
     })
     .catch((error) => {
-      if (connectDB.isMongoConnectionError(error) || error?.code === "USER_QUERY_TIMEOUT") {
+      if (connectDB.isMongoConnectionError(error)) {
         connectDB.scheduleReconnect("userLookup-refresh-failed");
       }
       return cachedPayload;
@@ -143,7 +143,9 @@ exports.getUserById = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     if (connectDB.isMongoConnectionError(error) || error?.code === "USER_QUERY_TIMEOUT") {
-      connectDB.scheduleReconnect("getUserById-query-failed");
+      if (connectDB.isMongoConnectionError(error)) {
+        connectDB.scheduleReconnect("getUserById-query-failed");
+      }
       return res.status(200).json({
         success: true,
         data: cached?.payload ? { ...cached.payload, id: cached.payload._id, _id: cached.payload._id } : null,
@@ -217,7 +219,9 @@ exports.getCurrentUser = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     if (connectDB.isMongoConnectionError(error) || error?.code === "USER_QUERY_TIMEOUT") {
-      connectDB.scheduleReconnect("getCurrentUser-query-failed");
+      if (connectDB.isMongoConnectionError(error)) {
+        connectDB.scheduleReconnect("getCurrentUser-query-failed");
+      }
       return res.status(200).json({
         success: true,
         data: cached?.payload ? formatCurrentUser(cached.payload) : null,
@@ -291,7 +295,7 @@ exports.updateCurrentUser = asyncHandler(async (req, res) => {
       throw error;
     }
 
-    await connectDB.forceReconnect("updateCurrentUser");
+    await connectDB.ensureConnected();
 
     user = await User.findByIdAndUpdate(
       String(userId),

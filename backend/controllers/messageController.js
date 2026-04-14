@@ -7,8 +7,8 @@ const connectDB = require("../config/db");
 
 const CACHE_TTL_MS = 15000;
 const CACHE_STALE_TTL_MS = 2 * 60 * 1000;
-const MESSAGES_QUERY_TIMEOUT_MS = 2500;
-const MESSAGES_REFRESH_TIMEOUT_MS = 900;
+const MESSAGES_QUERY_TIMEOUT_MS = 6000;
+const MESSAGES_REFRESH_TIMEOUT_MS = 1500;
 
 const conversationsCache = new Map();
 const messagesCache = new Map();
@@ -198,7 +198,7 @@ exports.getConversations = asyncHandler(async (req, res) => {
             return payload;
           })
           .catch((error) => {
-            if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+            if (connectDB.isMongoConnectionError(error)) {
               connectDB.scheduleReconnect("getConversations-refresh-failed");
             }
             return cached.payload;
@@ -215,8 +215,10 @@ exports.getConversations = asyncHandler(async (req, res) => {
     setCacheEntry(conversationsCache, cacheKey, payload);
     return res.json({ success: true, data: payload, meta: buildMeta({ cache: "refresh" }) });
   } catch (error) {
-    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+    if (connectDB.isMongoConnectionError(error)) {
       connectDB.scheduleReconnect("getConversations-query-failed");
+    }
+    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
       return res.status(200).json({
         success: true,
         data: cached?.payload || [],
@@ -261,7 +263,7 @@ exports.getMessages = asyncHandler(async (req, res) => {
             return payload;
           })
           .catch((error) => {
-            if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+            if (connectDB.isMongoConnectionError(error)) {
               connectDB.scheduleReconnect("getMessages-refresh-failed");
             }
             return cached.payload;
@@ -278,8 +280,10 @@ exports.getMessages = asyncHandler(async (req, res) => {
     setCacheEntry(messagesCache, cacheKey, payload);
     return res.json({ success: true, data: payload, meta: buildMeta({ cache: "refresh" }) });
   } catch (error) {
-    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
+    if (connectDB.isMongoConnectionError(error)) {
       connectDB.scheduleReconnect("getMessages-query-failed");
+    }
+    if (connectDB.isMongoConnectionError(error) || error?.code === "MESSAGE_QUERY_TIMEOUT") {
       return res.status(200).json({
         success: true,
         data: cached?.payload || [],
