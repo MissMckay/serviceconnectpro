@@ -29,7 +29,9 @@ export default function MessagesPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const messagesThreadRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const selectedConversation = conversations.find((c) => String(c._id) === String(selected?.id));
   const otherUser =
@@ -118,6 +120,7 @@ export default function MessagesPage() {
       setMessages([]);
       return;
     }
+    shouldStickToBottomRef.current = true;
     const unsub = subscribeMessages(selected.id, (list) => {
       setMessages(Array.isArray(list) ? list : []);
     });
@@ -127,8 +130,16 @@ export default function MessagesPage() {
   }, [selected?.id]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!shouldStickToBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages]);
+
+  const handleThreadScroll = () => {
+    const thread = messagesThreadRef.current;
+    if (!thread) return;
+    const distanceFromBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 72;
+  };
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -150,6 +161,7 @@ export default function MessagesPage() {
     setSending(true);
     setError("");
     setInput("");
+    shouldStickToBottomRef.current = true;
     setMessages((prev) => [...prev, optimisticMessage]);
     try {
       let convId = selected?.id;
@@ -264,7 +276,7 @@ export default function MessagesPage() {
                 <span className="messages-thread-name">{otherUser?.name || otherUser?.email || "Unknown"}</span>
               </header>
 
-              <div className="messages-thread">
+              <div className="messages-thread" ref={messagesThreadRef} onScroll={handleThreadScroll}>
                 {messages.map((msg) => {
                   const isMe = String(msg.senderId) === String(currentUserId);
                   return (

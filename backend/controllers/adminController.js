@@ -4,6 +4,7 @@ const Booking = require("../models/Booking");
 const Service = require("../models/Service");
 const Review = require("../models/Review");
 const asyncHandler = require("../utils/asyncHandler");
+const { archiveServicesByProvider, clearServicesListCache } = require("./serviceController");
 
 const escapeRegex = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -248,6 +249,12 @@ exports.deleteUser = asyncHandler(async (req, res) => {
       message: "User not found"
     });
   }
+
+  let archivedServices = 0;
+  if (String(user.role || "").toLowerCase() === "provider") {
+    archivedServices = await archiveServicesByProvider(uid, req.user?.id || "system");
+  }
+
   if (softDelete && !hardDelete) {
     user.accountStatus = "suspended";
     if (typeof user.save === "function") {
@@ -258,15 +265,18 @@ exports.deleteUser = asyncHandler(async (req, res) => {
 
     return res.json({
       success: true,
-      message: "User suspended successfully"
+      message: "User suspended successfully",
+      archivedServices
     });
   }
 
   await User.findByIdAndDelete(uid);
+  clearServicesListCache();
 
   return res.json({
     success: true,
-    message: "User deleted successfully"
+    message: "User deleted successfully",
+    archivedServices
   });
 });
 

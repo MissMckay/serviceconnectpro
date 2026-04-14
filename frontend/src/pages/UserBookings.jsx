@@ -10,6 +10,7 @@ import {
   getReviewsByService,
   getServiceById,
 } from "../firebase/firestoreServices";
+import DashboardActionIcon from "../components/DashboardActionIcon";
 import { formatStars } from "../utils/rating";
 import { getMarketplaceCardMedia, getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
@@ -343,8 +344,14 @@ const UserBookings = () => {
           <p style={{ marginBottom: "10px" }}>
             Your booking history will appear here after you book a service.
           </p>
-          <button style={actionButtonStyle} onClick={() => navigate("/services")}>
-            Browse Services
+          <button
+            style={actionButtonStyle}
+            className="booking-card__action-btn dashboard-icon-btn"
+            onClick={() => navigate("/services")}
+            aria-label="Browse services"
+            title="Browse services"
+          >
+            <DashboardActionIcon name="browse" />
           </button>
         </div>
       )}
@@ -467,15 +474,17 @@ const UserBookings = () => {
                       ))}
                       <button
                         style={{ ...actionButtonStyle, marginTop: "4px" }}
-                        className="booking-card__action-btn"
+                        className="booking-card__action-btn dashboard-icon-btn"
                         onClick={() =>
                           navigate(`/services/${serviceId}`, {
                             state: { from: "user-dashboard" }
                           })
                         }
                         disabled={!serviceId || !canOpenService}
+                        aria-label="Open service reviews"
+                        title="Open service reviews"
                       >
-                        Review
+                        <DashboardActionIcon name="review" />
                       </button>
                     </div>
                   );
@@ -486,10 +495,13 @@ const UserBookings = () => {
                   <div className="booking-actions-end">
                     <button
                       style={actionButtonStyle}
+                      className="booking-card__action-btn dashboard-icon-btn"
                       onClick={() => cancelBooking(booking._id)}
                       disabled={cancellingId === booking._id || isLoading}
+                      aria-label="Cancel booking"
+                      title="Cancel booking"
                     >
-                      {cancellingId === booking._id ? "Cancelling..." : "Cancel Booking"}
+                      {cancellingId === booking._id ? "…" : <DashboardActionIcon name="cancel" />}
                     </button>
                   </div>
                 )}
@@ -551,14 +563,16 @@ const UserBookings = () => {
 
                       <button
                         style={{ ...actionButtonStyle, marginTop: "6px" }}
-                        className="booking-card__action-btn"
+                        className="booking-card__action-btn dashboard-icon-btn"
                         onClick={() => submitReview(booking._id)}
                         disabled={
                           submittingId === booking._id ||
                           !String(reviews[booking._id]?.comment || "").trim()
                         }
+                        aria-label="Submit review"
+                        title="Submit review"
                       >
-                        {submittingId === booking._id ? "Submitting..." : "Submit Review"}
+                        {submittingId === booking._id ? "…" : <DashboardActionIcon name="review" />}
                       </button>
                     </>
                   )}
@@ -569,7 +583,7 @@ const UserBookings = () => {
                   {getProviderId(booking) && String(booking.status || "").toLowerCase() === "completed" && (
                     <button
                       type="button"
-                      className="booking-card__action-btn"
+                      className="booking-card__action-btn dashboard-icon-btn"
                       style={{
                         ...actionButtonStyle,
                         background: "var(--brand-blue)",
@@ -584,20 +598,24 @@ const UserBookings = () => {
                           }
                         })
                       }
+                      aria-label="Message provider"
+                      title="Message provider"
                     >
-                      Message provider
+                      <DashboardActionIcon name="message" />
                     </button>
                   )}
                   <button
-                    className="booking-card__action-btn"
+                    className="booking-card__action-btn dashboard-icon-btn"
                     style={{
                       ...actionButtonStyle,
                       background: "#6b7280"
                     }}
                     onClick={() => deleteBooking(booking._id)}
                     disabled={deletingId === booking._id || isLoading}
+                    aria-label="Delete booking"
+                    title="Delete booking"
                   >
-                    {deletingId === booking._id ? "Deleting..." : "Delete"}
+                    {deletingId === booking._id ? "…" : <DashboardActionIcon name="delete" />}
                   </button>
                 </div>
               </div>

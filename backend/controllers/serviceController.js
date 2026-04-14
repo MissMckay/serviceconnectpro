@@ -328,6 +328,29 @@ const clearServicesListCache = () => {
   serviceDetailRefreshPromises.clear();
 };
 
+const archiveServicesByProvider = async (providerId, removedBy = null) => {
+  const normalizedProviderId = String(providerId || "").trim();
+  if (!normalizedProviderId) return 0;
+
+  const result = await Service.updateMany(
+    {
+      providerId: normalizedProviderId,
+      moderationStatus: { $ne: "removed" },
+    },
+    {
+      $set: {
+        availabilityStatus: "Unavailable",
+        moderationStatus: "removed",
+        removedAt: new Date(),
+        removedBy: removedBy ? String(removedBy) : null,
+      },
+    }
+  );
+
+  clearServicesListCache();
+  return Number(result?.modifiedCount || result?.nModified || 0);
+};
+
 const getCacheEntry = (cacheKey) => {
   const cached = listCache.get(cacheKey);
   if (!cached) return null;
@@ -861,3 +884,6 @@ exports.deleteService = asyncHandler(async (req, res) => {
     message: "Service deleted successfully"
   });
 });
+
+exports.archiveServicesByProvider = archiveServicesByProvider;
+exports.clearServicesListCache = clearServicesListCache;

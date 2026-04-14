@@ -11,6 +11,7 @@ import { getEntityId, getServiceProviderId, serviceHasProviderSummary } from "..
 import { prepareProfilePhotoUpload } from "../utils/imageUpload";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 import TopbarUserMenu from "../components/TopbarUserMenu";
+import DashboardActionIcon from "../components/DashboardActionIcon";
 import { preloadBookingRoute, preloadServiceDetailsRoute } from "../utils/routePreload";
 
 const NEW_SERVICE_WINDOW_HOURS = 42;
@@ -226,6 +227,9 @@ const UserDashboard = () => {
     setProviderProfiles((prev) => ({ ...prev, ...embeddedProfiles }));
 
     const missingProviderIds = providerIds.filter((providerId) => {
+      if (Object.prototype.hasOwnProperty.call(providerProfiles, providerId)) {
+        return false;
+      }
       const matchingService = services.find(
         (service) => getServiceProviderId(service) === providerId
       );
@@ -247,9 +251,9 @@ const UserDashboard = () => {
     const loadProfiles = async () => {
       const profiles = await Promise.all(missingProviderIds.map((providerId) => getUserProfile(providerId)));
       if (cancelled) return;
-      const nextProfiles = profiles.reduce((acc, profile) => {
-        const providerId = getEntityId(profile);
-        if (providerId) acc[providerId] = profile;
+      const nextProfiles = profiles.reduce((acc, profile, index) => {
+        const providerId = getEntityId(profile) || missingProviderIds[index];
+        if (providerId) acc[providerId] = profile || null;
         return acc;
       }, {});
       setProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
@@ -739,10 +743,12 @@ const UserDashboard = () => {
                     </button>
                     <button
                       type="button"
-                      className="service-card-btn"
+                      className="service-card-btn dashboard-icon-btn"
                       onClick={() => setSelectedServiceId("")}
+                      aria-label="Close service details"
+                      title="Close service details"
                     >
-                      Cancel
+                      <DashboardActionIcon name="cancel" />
                     </button>
                   </div>
                 </div>
@@ -780,11 +786,12 @@ const UserDashboard = () => {
                     {(profileData || user)?.profilePhoto && (
                       <button
                         type="button"
-                        className="provider-profile-photo-btn provider-profile-photo-remove"
+                        className="provider-profile-photo-btn provider-profile-photo-remove dashboard-icon-btn"
                         onClick={handleRemoveProfilePhoto}
+                        aria-label="Remove photo"
                         title="Remove your profile photo. Your initials will show in the nav bar instead."
                       >
-                        Remove photo
+                        <DashboardActionIcon name="delete" />
                       </button>
                     )}
                   </div>

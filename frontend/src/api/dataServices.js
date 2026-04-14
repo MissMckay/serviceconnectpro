@@ -341,19 +341,26 @@ async function fetchServicesCollection(normalizedFilters, { onFirstPage, allPage
 // ---------- Users ----------
 export async function getUserProfile(uid, options = {}) {
   if (!uid) return null;
-  try {
-    return await getCachedOrFetch(
-      getCacheKey("user", uid),
-      async () => {
+  return getCachedOrFetch(
+    getCacheKey("user", uid),
+    async () => {
+      try {
         const res = await api.get(`users/${uid}`);
-        const d = res?.data ?? res;
-        return d ? { id: d._id || d.id, _id: d._id || d.id, ...d } : null;
-      },
-      options
-    );
-  } catch {
-    return null;
-  }
+        const payload = res?.data && typeof res.data === "object" && !Array.isArray(res.data)
+          ? res.data
+          : res;
+        if (!payload || typeof payload !== "object") return null;
+        const normalizedId = payload._id || payload.id;
+        return normalizedId ? { ...payload, id: normalizedId, _id: normalizedId } : payload;
+      } catch (error) {
+        if (error?.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    options
+  );
 }
 
 export async function setUserProfile(uid, data) {

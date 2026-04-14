@@ -18,6 +18,14 @@ const getSettingsPath = (role) => {
   return "/";
 };
 
+const getServicesPath = (role) => {
+  const r = String(role || "").toLowerCase();
+  if (r === "provider") return "/provider?view=manage";
+  if (r === "admin") return "/admin?view=services";
+  if (r === "user") return "/services";
+  return "/services";
+};
+
 const getDashboardPath = (role) => {
   const r = String(role || "").toLowerCase();
   if (r === "provider") return "/provider?view=dashboard";
@@ -43,6 +51,7 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
   const name = user?.name || user?.email || "User";
   const initials = getInitials(name);
   const settingsPath = getSettingsPath(role);
+  const servicesPath = getServicesPath(role);
   const dashboardPath = getDashboardPath(role);
   const logoutPath = getLogoutPath(role);
 
@@ -99,6 +108,16 @@ export default function TopbarUserMenu({ variant = "default", className = "" }) 
               onClick={() => setOpen(false)}
             >
               Dashboard
+            </Link>
+          )}
+          {servicesPath && (
+            <Link
+              to={servicesPath}
+              className="topbar-user-menu-item"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              Services
             </Link>
           )}
           {settingsPath && (

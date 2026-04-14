@@ -5,6 +5,7 @@ import { AuthContext } from "../context/AuthContext";
 import { createAdminInviteCode, getAdminInviteCodesList, subscribeAdminInviteCodes, updateUserProfile, deleteUserProfile, getUserProfile, subscribeServices } from "../firebase/firestoreServices";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { getEntityId, getLiveProviderPhoto, getServiceProviderId, serviceHasProviderSummary } from "../utils/providerProfile";
+import DashboardActionIcon from "../components/DashboardActionIcon";
 
 const allowedSections = new Set(["overview", "users", "services", "reports", "create-admin"]);
 
@@ -261,6 +262,9 @@ const AdminDashboard = () => {
     let cancelled = false;
 
     const providersNeedingHydration = providerIds.filter((providerId) => {
+      if (Object.prototype.hasOwnProperty.call(serviceProviderProfiles, String(providerId))) {
+        return false;
+      }
       const matchingService = combinedServices.find(
         (service) => getServiceProviderId(service) === providerId
       );
@@ -282,12 +286,12 @@ const AdminDashboard = () => {
         providersNeedingHydration.map((providerId) => getUserProfile(providerId))
       );
       if (cancelled) return;
-      const nextProfiles = profiles.reduce((acc, profile) => {
-        const providerId = getEntityId(profile);
-        if (providerId) acc[providerId] = profile;
+      const nextProfiles = profiles.reduce((acc, profile, index) => {
+        const providerId = getEntityId(profile) || String(providersNeedingHydration[index] || "");
+        if (providerId) acc[providerId] = profile || null;
         return acc;
       }, {});
-      setServiceProviderProfiles(nextProfiles);
+      setServiceProviderProfiles((prev) => ({ ...prev, ...nextProfiles }));
     };
 
     loadProfiles();
@@ -1015,7 +1019,16 @@ const AdminDashboard = () => {
                 <select value={usersFilters.approved} onChange={(event) => setUsersFilters((prev) => ({ ...prev, approved: event.target.value }))}>
                   <option value="all">All Approval</option><option value="approved">Approved</option><option value="pending">Not Approved</option>
                 </select>
-                <button type="button" className="admin-action-btn" onClick={refreshUsers} disabled={isUsersLoading}>Refresh</button>
+                <button
+                  type="button"
+                  className="admin-action-btn dashboard-icon-btn"
+                  onClick={refreshUsers}
+                  disabled={isUsersLoading}
+                  aria-label="Refresh users"
+                  title="Refresh users"
+                >
+                  <DashboardActionIcon name="refresh" />
+                </button>
               </div>
 
               {isUsersLoading ? <p>Loading users...</p> : (
@@ -1045,13 +1058,58 @@ const AdminDashboard = () => {
                                   <button type="button" className="admin-action-btn view-profile-btn" onClick={() => navigateToUserDetails(user)}>View profile</button>
                                   {isPendingProvider && (
                                     <>
-                                      <button type="button" className="admin-action-btn approve-btn" onClick={() => handleProviderApproval(userId, "approve")} disabled={getUserBusy(userId, "approve")}>Accept</button>
-                                      <button type="button" className="admin-action-btn reject-btn" onClick={() => handleProviderApproval(userId, "reject")} disabled={getUserBusy(userId, "reject")}>Reject</button>
+                                      <button
+                                        type="button"
+                                        className="admin-action-btn approve-btn dashboard-icon-btn"
+                                        onClick={() => handleProviderApproval(userId, "approve")}
+                                        disabled={getUserBusy(userId, "approve")}
+                                        aria-label="Accept provider"
+                                        title="Accept provider"
+                                      >
+                                        <DashboardActionIcon name="accept" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="admin-action-btn reject-btn dashboard-icon-btn"
+                                        onClick={() => handleProviderApproval(userId, "reject")}
+                                        disabled={getUserBusy(userId, "reject")}
+                                        aria-label="Reject provider"
+                                        title="Reject provider"
+                                      >
+                                        <DashboardActionIcon name="reject" />
+                                      </button>
                                     </>
                                   )}
-                                  <button type="button" className="admin-action-btn suspend-btn" onClick={() => runUserStatusAction(userId, "suspended")} disabled={getUserBusy(userId, "status-suspended") || isSuspended}>Suspend</button>
-                                  <button type="button" className="admin-action-btn activate-btn" onClick={() => runUserStatusAction(userId, "active")} disabled={getUserBusy(userId, "status-active") || !isSuspended}>Activate</button>
-                                  <button type="button" className="admin-action-btn remove-btn" onClick={() => deleteUser(user)} disabled={getUserBusy(userId, "delete")}>Delete</button>
+                                  <button
+                                    type="button"
+                                    className="admin-action-btn suspend-btn dashboard-icon-btn"
+                                    onClick={() => runUserStatusAction(userId, "suspended")}
+                                    disabled={getUserBusy(userId, "status-suspended") || isSuspended}
+                                    aria-label="Suspend user"
+                                    title="Suspend user"
+                                  >
+                                    <DashboardActionIcon name="suspend" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-action-btn activate-btn dashboard-icon-btn"
+                                    onClick={() => runUserStatusAction(userId, "active")}
+                                    disabled={getUserBusy(userId, "status-active") || !isSuspended}
+                                    aria-label="Activate user"
+                                    title="Activate user"
+                                  >
+                                    <DashboardActionIcon name="activate" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-action-btn remove-btn dashboard-icon-btn"
+                                    onClick={() => deleteUser(user)}
+                                    disabled={getUserBusy(userId, "delete")}
+                                    aria-label="Delete user"
+                                    title="Delete user"
+                                  >
+                                    <DashboardActionIcon name="delete" />
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1063,20 +1121,24 @@ const AdminDashboard = () => {
                   <div className="admin-pagination">
                     <button
                       type="button"
-                      className="admin-action-btn"
+                      className="admin-action-btn dashboard-icon-btn"
                       onClick={() => setUsersPage((prev) => Math.max(1, prev - 1))}
                       disabled={safeUsersPage <= 1}
+                      aria-label="Previous users page"
+                      title="Previous users page"
                     >
-                      Previous Page
+                      <DashboardActionIcon name="previous" />
                     </button>
                     <span>Page {safeUsersPage} of {usersTotalPages}</span>
                     <button
                       type="button"
-                      className="admin-action-btn"
+                      className="admin-action-btn dashboard-icon-btn"
                       onClick={() => setUsersPage((prev) => Math.min(usersTotalPages, prev + 1))}
                       disabled={safeUsersPage >= usersTotalPages}
+                      aria-label="Next users page"
+                      title="Next users page"
                     >
-                      Next Page
+                      <DashboardActionIcon name="next" />
                     </button>
                   </div>
                 </>
@@ -1098,7 +1160,16 @@ const AdminDashboard = () => {
                 <select value={serviceFilters.status} onChange={(event) => setServiceFilters((prev) => ({ ...prev, status: event.target.value, page: 1 }))}>
                   <option value="all">All Statuses</option><option value="available">Available</option><option value="unavailable">Unavailable</option>
                 </select>
-                <button type="button" className="admin-action-btn" onClick={refreshServices} disabled={isServicesLoading}>Refresh</button>
+                <button
+                  type="button"
+                  className="admin-action-btn dashboard-icon-btn"
+                  onClick={refreshServices}
+                  disabled={isServicesLoading}
+                  aria-label="Refresh services"
+                  title="Refresh services"
+                >
+                  <DashboardActionIcon name="refresh" />
+                </button>
               </div>
 
               {isServicesLoading ? <p>Loading services...</p> : (
@@ -1129,8 +1200,25 @@ const AdminDashboard = () => {
                               <td>
                                 <div className="admin-inline-actions">
                                   <button type="button" className="admin-action-btn" onClick={() => navigateToServiceDetails(service)}>View</button>
-                                  <button type="button" className="admin-action-btn remove-btn" onClick={() => removeService(service)} disabled={busyActionId === `${serviceId}-remove`}>Remove Service</button>
-                                  <button type="button" className="admin-action-btn suspend-btn" onClick={() => suspendProviderFromService(service)}>Suspend Provider</button>
+                                  <button
+                                    type="button"
+                                    className="admin-action-btn remove-btn dashboard-icon-btn"
+                                    onClick={() => removeService(service)}
+                                    disabled={busyActionId === `${serviceId}-remove`}
+                                    aria-label="Remove service"
+                                    title="Remove service"
+                                  >
+                                    <DashboardActionIcon name="delete" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-action-btn suspend-btn dashboard-icon-btn"
+                                    onClick={() => suspendProviderFromService(service)}
+                                    aria-label="Suspend provider"
+                                    title="Suspend provider"
+                                  >
+                                    <DashboardActionIcon name="suspend" />
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1141,9 +1229,27 @@ const AdminDashboard = () => {
                   </div>
 
                   <div className="admin-pagination">
-                    <button type="button" className="admin-action-btn" onClick={() => setServiceFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))} disabled={servicePagination.page <= 1}>Prev</button>
+                    <button
+                      type="button"
+                      className="admin-action-btn dashboard-icon-btn"
+                      onClick={() => setServiceFilters((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+                      disabled={servicePagination.page <= 1}
+                      aria-label="Previous services page"
+                      title="Previous services page"
+                    >
+                      <DashboardActionIcon name="previous" />
+                    </button>
                     <span>Page {servicePagination.page} of {servicePagination.totalPages}</span>
-                    <button type="button" className="admin-action-btn" onClick={() => setServiceFilters((prev) => ({ ...prev, page: Math.min(servicePagination.totalPages, prev.page + 1) }))} disabled={servicePagination.page >= servicePagination.totalPages}>Next</button>
+                    <button
+                      type="button"
+                      className="admin-action-btn dashboard-icon-btn"
+                      onClick={() => setServiceFilters((prev) => ({ ...prev, page: Math.min(servicePagination.totalPages, prev.page + 1) }))}
+                      disabled={servicePagination.page >= servicePagination.totalPages}
+                      aria-label="Next services page"
+                      title="Next services page"
+                    >
+                      <DashboardActionIcon name="next" />
+                    </button>
                   </div>
                 </>
               )}
@@ -1160,8 +1266,10 @@ const AdminDashboard = () => {
               <div style={{ marginTop: "1rem" }}>
                 <button
                   type="button"
-                  className="admin-action-btn"
+                  className="admin-action-btn dashboard-icon-btn"
                   disabled={adminInviteLoading || !user?.uid}
+                  aria-label="Generate admin invite link"
+                  title="Generate admin invite link"
                   onClick={async () => {
                     setAdminInviteError("");
                     setAdminInviteLoading(true);
@@ -1177,7 +1285,7 @@ const AdminDashboard = () => {
                     }
                   }}
                 >
-                  {adminInviteLoading ? "Generating…" : "Generate another admin invite link"}
+                  {adminInviteLoading ? "…" : <DashboardActionIcon name="add" />}
                 </button>
               </div>
               <div style={{ marginTop: "1.5rem" }}>
@@ -1221,14 +1329,16 @@ const AdminDashboard = () => {
                               <td>
                                 <button
                                   type="button"
-                                  className="admin-action-btn"
+                                  className="admin-action-btn dashboard-icon-btn"
                                   disabled={used}
+                                  aria-label="Copy invite link"
+                                  title="Copy invite link"
                                   onClick={() => {
                                     navigator.clipboard.writeText(link);
                                     showSuccess("Link copied to clipboard.");
                                   }}
                                 >
-                                  Copy
+                                  <DashboardActionIcon name="copy" />
                                 </button>
                               </td>
                             </tr>

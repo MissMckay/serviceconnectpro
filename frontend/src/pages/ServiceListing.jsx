@@ -74,13 +74,15 @@ const ServiceListing = () => {
 
   useEffect(() => {
     const providersNeedingHydration = deferredServices.filter(
-      (service) =>
-        getServiceProviderId(service) &&
-        !providerProfiles[getServiceProviderId(service)] &&
-        (
+      (service) => {
+        const providerId = getServiceProviderId(service);
+        if (!providerId) return false;
+        if (Object.prototype.hasOwnProperty.call(providerProfiles, providerId)) return false;
+        return (
           !serviceHasProviderSummary(service) ||
           !getMarketplaceCardMedia(service, providerProfiles).providerPhotoUrl
-        )
+        );
+      }
     ).slice(0, 12);
 
     if (!providersNeedingHydration.length) return undefined;
@@ -94,9 +96,10 @@ const ServiceListing = () => {
 
       if (cancelled) return;
 
-      const nextProfiles = profiles.reduce((acc, profile) => {
-        const providerId = profile?._id || profile?.id;
-        if (providerId) acc[providerId] = profile;
+      const nextProfiles = profiles.reduce((acc, profile, index) => {
+        const fallbackProviderId = getServiceProviderId(providersNeedingHydration[index]);
+        const providerId = profile?._id || profile?.id || fallbackProviderId;
+        if (providerId) acc[providerId] = profile || null;
         return acc;
       }, {});
 

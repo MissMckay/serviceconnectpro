@@ -96,9 +96,11 @@ const DashboardLayout = ({ role, children }) => {
         )}
 
         <div className="protected-topbar-right">
-          <Link to="/services" className="protected-topbar-services-link">
-            Services
-          </Link>
+          {safeRole === "user" && (
+            <Link to="/services" className="protected-topbar-services-link">
+              Services
+            </Link>
+          )}
           <TopbarUserMenu variant="protected" />
         </div>
       </header>

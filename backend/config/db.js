@@ -10,6 +10,7 @@ let reconnectAttempts = 0;
 let degradedUntil = 0;
 let lastConnectionIssue = null;
 let lastLoggedIssueKey = null;
+let disconnectedAt = 0;
 
 const CONNECTED_STATE = 1;
 const CONNECTING_STATE = 2;
@@ -34,6 +35,7 @@ const clearDegradedState = () => {
   degradedUntil = 0;
   lastConnectionIssue = null;
   lastLoggedIssueKey = null;
+  disconnectedAt = 0;
 };
 
 const getConnectionStatus = () => ({
@@ -134,6 +136,7 @@ const attachConnectionListeners = () => {
   });
 
   mongoose.connection.on("disconnected", () => {
+    disconnectedAt = Date.now();
     setDegradedState(null, "disconnected");
     scheduleReconnect("disconnected");
   });
@@ -141,7 +144,9 @@ const attachConnectionListeners = () => {
   mongoose.connection.on("error", (error) => {
     if (isMongoConnectionError(error)) {
       setDegradedState(error, error.name || "error");
-      scheduleReconnect(error.name || "error");
+      if (mongoose.connection.readyState !== CONNECTED_STATE) {
+        scheduleReconnect(error.name || "error");
+      }
     }
   });
 };
@@ -361,13 +366,27 @@ const scheduleReconnect = (reason = "unknown") => {
     return;
   }
 
+  const disconnectGraceMs = getIntEnv("MONGO_DISCONNECT_GRACE_MS", 8000);
+  const timeSinceDisconnect = disconnectedAt ? Date.now() - disconnectedAt : disconnectGraceMs;
+  const graceDelayMs =
+    reason === "disconnected" && timeSinceDisconnect < disconnectGraceMs
+      ? disconnectGraceMs - timeSinceDisconnect
+      : 0;
+
   reconnectAttempts += 1;
   const baseDelayMs = getIntEnv("MONGO_RECONNECT_BASE_DELAY_MS", 3000);
   const maxDelayMs = getIntEnv("MONGO_RECONNECT_MAX_DELAY_MS", 30000);
-  const delayMs = Math.min(baseDelayMs * reconnectAttempts, maxDelayMs);
+  const retryDelayMs = Math.min(baseDelayMs * reconnectAttempts, maxDelayMs);
+  const delayMs = Math.max(graceDelayMs, retryDelayMs);
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    if (
+      mongoose.connection.readyState === CONNECTED_STATE ||
+      mongoose.connection.readyState === CONNECTING_STATE
+    ) {
+      return;
+    }
     connectDB().catch((error) => {
       scheduleReconnect("retry-failed");
     });

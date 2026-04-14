@@ -28,6 +28,7 @@ import {
 } from "recharts";
 import { formatLrdPrice } from "../utils/currency";
 import TopbarUserMenu from "../components/TopbarUserMenu";
+import DashboardActionIcon from "../components/DashboardActionIcon";
 
 const defaultFormState = {
   serviceName: "",
@@ -967,32 +968,38 @@ const ProviderDashboard = () => {
                                 <>
                                   <button
                                     type="button"
-                                    className="provider-table-btn provider-table-btn-accept"
+                                    className="provider-table-btn provider-table-btn-accept dashboard-icon-btn"
                                     onClick={() => updateStatus(booking._id, "Accepted")}
+                                    aria-label="Accept booking"
+                                    title="Accept booking"
                                   >
-                                    Accept
+                                    <DashboardActionIcon name="accept" />
                                   </button>
                                   <button
                                     type="button"
-                                    className="provider-table-btn provider-table-btn-reject"
+                                    className="provider-table-btn provider-table-btn-reject dashboard-icon-btn"
                                     onClick={() => updateStatus(booking._id, "Rejected")}
+                                    aria-label="Reject booking"
+                                    title="Reject booking"
                                   >
-                                    Reject
+                                    <DashboardActionIcon name="reject" />
                                   </button>
                                 </>
                               )}
                               {booking.status === "Accepted" && (
                                 <button
                                   type="button"
-                                  className="provider-table-btn provider-table-btn-complete"
+                                  className="provider-table-btn provider-table-btn-complete dashboard-icon-btn"
                                   onClick={() => updateStatus(booking._id, "Completed")}
+                                  aria-label="Mark booking complete"
+                                  title="Mark booking complete"
                                 >
-                                  Complete
+                                  <DashboardActionIcon name="complete" />
                                 </button>
                               )}
                               <button
                                 type="button"
-                                className="provider-table-btn provider-table-btn-message"
+                                className="provider-table-btn provider-table-btn-message dashboard-icon-btn"
                                 onClick={() =>
                                   navigate("/messages", {
                                     state: {
@@ -1002,8 +1009,10 @@ const ProviderDashboard = () => {
                                     }
                                   })
                                 }
+                                aria-label="Message customer"
+                                title="Message customer"
                               >
-                                Message
+                                <DashboardActionIcon name="message" />
                               </button>
                             </td>
                           </tr>
@@ -1066,11 +1075,13 @@ const ProviderDashboard = () => {
                     {providerProfile?.profilePhoto && (
                       <button
                         type="button"
-                        className="provider-profile-photo-btn provider-profile-photo-remove"
+                        className="provider-profile-photo-btn provider-profile-photo-remove dashboard-icon-btn"
                         onClick={handleRemoveProfilePhoto}
                         disabled={!canAddService}
+                        aria-label="Remove profile photo"
+                        title="Remove profile photo"
                       >
-                        Remove
+                        <DashboardActionIcon name="delete" />
                       </button>
                     )}
                   </div>
@@ -1210,12 +1221,13 @@ const ProviderDashboard = () => {
                             </label>
                             <button
                               type="button"
-                              className="provider-media-remove"
+                              className="provider-media-remove dashboard-icon-btn"
                               onClick={() => removeMediaRow(index)}
                               disabled={!canAddService}
                               aria-label={`Remove image ${index + 1}`}
+                              title={`Remove image ${index + 1}`}
                             >
-                              Remove
+                              <DashboardActionIcon name="delete" />
                             </button>
                           </div>
                         ))}
@@ -1234,10 +1246,12 @@ const ProviderDashboard = () => {
                   {editingServiceId && (
                     <button
                       type="button"
-                      className="provider-action-btn provider-edit-btn"
+                      className="provider-action-btn provider-edit-btn dashboard-icon-btn"
                       onClick={() => clearEditMode({ navigateToManage: true })}
+                      aria-label="Cancel edit"
+                      title="Cancel edit"
                     >
-                      Cancel edit
+                      <DashboardActionIcon name="cancel" />
                     </button>
                   )}
                 </div>
@@ -1275,18 +1289,22 @@ const ProviderDashboard = () => {
                             <div className="provider-action-group">
                               <button
                                 type="button"
-                                className="provider-action-btn provider-edit-btn"
+                                className="provider-action-btn provider-edit-btn dashboard-icon-btn"
                                 onClick={() => startEditService(service)}
                                 disabled={isPreparingEdit}
+                                aria-label="Edit service"
+                                title="Edit service"
                               >
-                                {isPreparingEdit && String(preparingEditId || "") === String(service?._id || "") ? "Loading…" : "Edit"}
+                                {isPreparingEdit && String(preparingEditId || "") === String(service?._id || "") ? "…" : <DashboardActionIcon name="edit" />}
                               </button>
                               <button
                                 type="button"
-                                className="provider-action-btn provider-delete-btn"
+                                className="provider-action-btn provider-delete-btn dashboard-icon-btn"
                                 onClick={() => deleteService(service._id)}
+                                aria-label="Delete service"
+                                title="Delete service"
                               >
-                                Delete
+                                <DashboardActionIcon name="delete" />
                               </button>
                             </div>
                           </td>
@@ -1342,7 +1360,7 @@ const ProviderDashboard = () => {
                               <div className="provider-action-group">
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-edit-btn"
+                                  className="provider-action-btn provider-edit-btn dashboard-icon-btn"
                                   onClick={() =>
                                     navigate("/messages", {
                                       state: {
@@ -1352,32 +1370,40 @@ const ProviderDashboard = () => {
                                       }
                                     })
                                   }
+                                  aria-label="Message customer"
+                                  title="Message customer"
                                 >
-                                  Message
+                                  <DashboardActionIcon name="message" />
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-accept-btn"
+                                  className="provider-action-btn provider-accept-btn dashboard-icon-btn"
                                   onClick={() => updateStatus(booking._id, "Accepted")}
                                   disabled={!isPending}
+                                  aria-label="Accept booking"
+                                  title="Accept booking"
                                 >
-                                  Accept
+                                  <DashboardActionIcon name="accept" />
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-reject-btn"
+                                  className="provider-action-btn provider-reject-btn dashboard-icon-btn"
                                   onClick={() => updateStatus(booking._id, "Rejected")}
                                   disabled={!isPending}
+                                  aria-label="Reject booking"
+                                  title="Reject booking"
                                 >
-                                  Reject
+                                  <DashboardActionIcon name="reject" />
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-complete-btn"
+                                  className="provider-action-btn provider-complete-btn dashboard-icon-btn"
                                   onClick={() => updateStatus(booking._id, "Completed")}
                                   disabled={!isAccepted}
+                                  aria-label="Mark booking complete"
+                                  title="Mark booking complete"
                                 >
-                                  Mark Complete
+                                  <DashboardActionIcon name="complete" />
                                 </button>
                               </div>
                             </td>
@@ -1440,11 +1466,12 @@ const ProviderDashboard = () => {
                     {providerProfile?.profilePhoto && (
                       <button
                         type="button"
-                        className="provider-profile-photo-btn provider-profile-photo-remove"
+                        className="provider-profile-photo-btn provider-profile-photo-remove dashboard-icon-btn"
                         onClick={handleRemoveProfilePhoto}
+                        aria-label="Remove photo"
                         title="Remove your profile photo. Your initials will show in the nav bar instead."
                       >
-                        Remove photo
+                        <DashboardActionIcon name="delete" />
                       </button>
                     )}
                   </div>
@@ -1486,8 +1513,14 @@ const ProviderDashboard = () => {
                   </div>
                 </section>
                 <div className="provider-form-actions">
-                  <button type="submit" className="provider-primary-btn" disabled={isSavingSettings}>
-                    {isSavingSettings ? "Saving…" : "Save settings"}
+                  <button
+                    type="submit"
+                    className="provider-primary-btn dashboard-icon-btn"
+                    disabled={isSavingSettings}
+                    aria-label="Save settings"
+                    title="Save settings"
+                  >
+                    {isSavingSettings ? "…" : <DashboardActionIcon name="save" />}
                   </button>
                 </div>
               </form>
