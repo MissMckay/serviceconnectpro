@@ -168,8 +168,9 @@ router.post("/login", async (req, res) => {
     }
 
     const user = await User.findOne({ email: normalizedEmail })
-      .read("secondaryPreferred")
-      .maxTimeMS(2500);
+      .select("name email password role phone providerAddress accountStatus isApproved approvalStatus profilePhoto")
+      .maxTimeMS(4000)
+      .lean();
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }

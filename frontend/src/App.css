@@ -382,10 +382,40 @@
   padding: 0 4px;
 }
 
+.protected-sidebar-title--desktop {
+  display: block;
+}
+
+.protected-sidebar-toggle {
+  display: none;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 0;
+  padding: 12px 14px;
+}
+
+.protected-sidebar-toggle strong {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .protected-sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.protected-sidebar-mobile-label {
+  display: none;
 }
 
 .protected-sidebar-link {
@@ -4643,6 +4673,34 @@
 
   .protected-sidebar {
     width: 100%;
+    padding: 14px 14px 10px;
+  }
+
+  .protected-sidebar-title--desktop {
+    display: none;
+  }
+
+  .protected-sidebar-toggle {
+    display: flex;
+  }
+
+  .protected-sidebar-nav {
+    display: none;
+    margin-top: 10px;
+  }
+
+  .protected-sidebar.is-mobile-open .protected-sidebar-nav {
+    display: flex;
+  }
+
+  .protected-sidebar-mobile-label {
+    display: block;
+    margin: 0 0 8px;
+    padding: 0 4px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    letter-spacing: 0.02em;
   }
 
   .protected-content {
@@ -4708,12 +4766,13 @@
   }
 
   .dashboard-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .bookings-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .service-listing-grid {
@@ -4777,6 +4836,43 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .dashboard-grid .sc-card__desc,
+  .dashboard-grid .sc-card__provider-location {
+    display: -webkit-box;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dashboard-grid .sc-card__desc {
+    -webkit-line-clamp: 2;
+  }
+
+  .dashboard-grid .sc-card__provider-location {
+    -webkit-line-clamp: 1;
+  }
+
+  .booking-card__meta {
+    font-size: 0.7rem;
+    line-height: 1.24;
+    -webkit-line-clamp: 2;
+  }
+
+  .booking-card__section-title {
+    font-size: 0.72rem;
+  }
+
+  .booking-card__review-item,
+  .booking-card__empty-text {
+    font-size: 0.62rem;
+    line-height: 1.2;
+  }
+
+  .booking-card__action-btn {
+    font-size: 0.6rem;
+    padding: 5px 6px;
+  }
+
   .review-top-nav {
     padding: 0 14px;
   }
@@ -4791,6 +4887,12 @@
 }
 
 @media (max-width: 540px) {
+  .dashboard-grid,
+  .bookings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
   .service-listing-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
@@ -6294,7 +6396,7 @@
   }
 
   .bookings-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -1,4 +1,4 @@
-import { useContext } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import { canProviderCreateServices } from "../utils/providerAccess";
@@ -37,6 +37,11 @@ const DashboardLayout = ({ role, children }) => {
       ? navItemsByRole.provider.filter((item) => item.to !== "/provider?view=add")
       : navItemsByRole[safeRole] || [];
   const showSidebar = safeRole === "user" || safeRole === "provider" || safeRole === "admin";
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname, location.search]);
 
   const isNavItemActive = (to) => {
     const currentPath = location.pathname;
@@ -72,10 +77,12 @@ const DashboardLayout = ({ role, children }) => {
 
   const dashboardTitle =
     safeRole === "admin"
-      ? null
+      ? "Admin Dashboard"
       : safeRole === "user"
         ? "User Dashboard"
-        : null;
+        : safeRole === "provider"
+          ? "Provider Dashboard"
+          : null;
 
   return (
     <div className={`protected-layout role-${safeRole || "guest"}`}>
@@ -98,17 +105,37 @@ const DashboardLayout = ({ role, children }) => {
 
       <div className="protected-body">
         {showSidebar && (
-          <aside className="protected-sidebar" aria-label="Sidebar navigation">
-            <div className="protected-sidebar-title">
-              {safeRole === "provider" ? "Menu" : "Dashboard Menu"}
+          <aside
+            className={`protected-sidebar${isMobileMenuOpen ? " is-mobile-open" : ""}`}
+            aria-label="Sidebar navigation"
+          >
+            <button
+              type="button"
+              className="protected-sidebar-title protected-sidebar-toggle"
+              onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls={`protected-sidebar-nav-${safeRole}`}
+            >
+              <span>{dashboardTitle || "Dashboard Menu"}</span>
+              <strong>{isMobileMenuOpen ? "Hide" : "Show"}</strong>
+            </button>
+            <div className="protected-sidebar-title protected-sidebar-title--desktop">
+              {dashboardTitle || "Dashboard Menu"}
             </div>
-            <nav className="protected-sidebar-nav">
+            <nav
+              id={`protected-sidebar-nav-${safeRole}`}
+              className="protected-sidebar-nav"
+            >
+              <div className="protected-sidebar-mobile-label">
+                {dashboardTitle || "Dashboard Menu"}
+              </div>
               {navItems.map((item) => (
                 <Link
                   key={`side-${item.to}`}
                   to={item.to}
                   state={item.to === "/messages" ? { fromRole: safeRole } : undefined}
                   className={`protected-sidebar-link${isNavItemActive(item.to) ? " active" : ""}`}
+                  onClick={() => setIsMobileMenuOpen(false)}
                 >
                   {item.label}
                 </Link>
