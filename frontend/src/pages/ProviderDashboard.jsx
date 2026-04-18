@@ -968,33 +968,36 @@ const ProviderDashboard = () => {
                                 <>
                                   <button
                                     type="button"
-                                    className="provider-table-btn provider-table-btn-accept dashboard-icon-btn"
+                                    className="provider-table-btn provider-table-btn-accept provider-table-btn-label"
                                     onClick={() => updateStatus(booking._id, "Accepted")}
                                     aria-label="Accept booking"
                                     title="Accept booking"
                                   >
                                     <DashboardActionIcon name="accept" />
+                                    <span>Accept</span>
                                   </button>
                                   <button
                                     type="button"
-                                    className="provider-table-btn provider-table-btn-reject dashboard-icon-btn"
+                                    className="provider-table-btn provider-table-btn-reject provider-table-btn-label"
                                     onClick={() => updateStatus(booking._id, "Rejected")}
                                     aria-label="Reject booking"
                                     title="Reject booking"
                                   >
                                     <DashboardActionIcon name="reject" />
+                                    <span>Reject</span>
                                   </button>
                                 </>
                               )}
                               {booking.status === "Accepted" && (
                                 <button
                                   type="button"
-                                  className="provider-table-btn provider-table-btn-complete dashboard-icon-btn"
+                                  className="provider-table-btn provider-table-btn-complete provider-table-btn-label"
                                   onClick={() => updateStatus(booking._id, "Completed")}
                                   aria-label="Mark booking complete"
                                   title="Mark booking complete"
                                 >
                                   <DashboardActionIcon name="complete" />
+                                  <span>Complete</span>
                                 </button>
                               )}
                               <button
@@ -1377,33 +1380,36 @@ const ProviderDashboard = () => {
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-accept-btn dashboard-icon-btn"
+                                  className="provider-action-btn provider-accept-btn provider-action-btn-label"
                                   onClick={() => updateStatus(booking._id, "Accepted")}
                                   disabled={!isPending}
                                   aria-label="Accept booking"
                                   title="Accept booking"
                                 >
                                   <DashboardActionIcon name="accept" />
+                                  <span>Accept</span>
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-reject-btn dashboard-icon-btn"
+                                  className="provider-action-btn provider-reject-btn provider-action-btn-label"
                                   onClick={() => updateStatus(booking._id, "Rejected")}
                                   disabled={!isPending}
                                   aria-label="Reject booking"
                                   title="Reject booking"
                                 >
                                   <DashboardActionIcon name="reject" />
+                                  <span>Reject</span>
                                 </button>
                                 <button
                                   type="button"
-                                  className="provider-action-btn provider-complete-btn dashboard-icon-btn"
+                                  className="provider-action-btn provider-complete-btn provider-action-btn-label"
                                   onClick={() => updateStatus(booking._id, "Completed")}
                                   disabled={!isAccepted}
                                   aria-label="Mark booking complete"
                                   title="Mark booking complete"
                                 >
                                   <DashboardActionIcon name="complete" />
+                                  <span>Complete</span>
                                 </button>
                               </div>
                             </td>

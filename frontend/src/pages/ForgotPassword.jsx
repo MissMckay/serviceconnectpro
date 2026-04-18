@@ -7,17 +7,20 @@ const ForgotPassword = () => {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [resetUrl, setResetUrl] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
+    setResetUrl("");
     setIsSubmitting(true);
 
     try {
-      await resetPassword(email.trim());
-      setSuccess("If this email exists, a password reset link has been sent.");
+      const result = await resetPassword(email.trim());
+      setSuccess(result?.message || "If this email exists, a password reset link has been sent.");
+      setResetUrl(result?.resetUrl || "");
     } catch (err) {
       setError(
         err?.message ||
@@ -66,6 +69,11 @@ const ForgotPassword = () => {
           Back to <Link to="/login">Login</Link>
         </p>
         {success && <p className="forgot-success">{success}</p>}
+        {resetUrl && (
+          <p className="forgot-success">
+            Reset link: <a href={resetUrl}>{resetUrl}</a>
+          </p>
+        )}
         {error && <p className="login-error">{error}</p>}
       </div>
     </div>

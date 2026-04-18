@@ -1,6 +1,7 @@
 export const loadAuthPage = () => import("../pages/AuthPage");
 export const loadLoginPage = () => import("../pages/Login");
 export const loadForgotPasswordPage = () => import("../pages/ForgotPassword");
+export const loadResetPasswordPage = () => import("../pages/ResetPassword");
 export const loadRegisterAdminPage = () => import("../pages/RegisterAdmin");
 export const loadAdminLoginPage = () => import("../pages/AdminLoginPage");
 export const loadServiceListingPage = () => import("../pages/ServiceListing");
@@ -15,6 +16,9 @@ export const loadMessagesLayout = () => import("../components/MessagesLayout");
 
 export const preloadServiceDetailsRoute = (serviceId) =>
   loadServiceDetailsPage().catch(() => null);
+
+export const preloadServiceListingRoute = () =>
+  loadServiceListingPage().catch(() => null);
 
 export const preloadBookingRoute = (serviceId) =>
   loadBookingPage().catch(() => null);

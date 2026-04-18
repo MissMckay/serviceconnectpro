@@ -30,8 +30,8 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const messagesThreadRef = useRef(null);
-  const messagesEndRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
+  const lastMessageKeyRef = useRef("");
 
   const selectedConversation = conversations.find((c) => String(c._id) === String(selected?.id));
   const otherUser =
@@ -130,8 +130,19 @@ export default function MessagesPage() {
   }, [selected?.id]);
 
   useEffect(() => {
-    if (!shouldStickToBottomRef.current) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    const thread = messagesThreadRef.current;
+    if (!thread || !shouldStickToBottomRef.current) return;
+
+    const nextLastMessage = messages.length
+      ? String(messages[messages.length - 1]?._id || messages[messages.length - 1]?.id || messages.length)
+      : "";
+
+    if (nextLastMessage && nextLastMessage === lastMessageKeyRef.current) {
+      return;
+    }
+
+    thread.scrollTop = thread.scrollHeight;
+    lastMessageKeyRef.current = nextLastMessage;
   }, [messages]);
 
   const handleThreadScroll = () => {
@@ -289,7 +300,6 @@ export default function MessagesPage() {
                     </div>
                   );
                 })}
-                <div ref={messagesEndRef} />
               </div>
 
               <form className="messages-send-form" onSubmit={handleSend}>

@@ -534,10 +534,10 @@ export function subscribeServices(filters, setData, options = {}) {
 
 export async function getServiceById(id, options = {}) {
   if (!id) return null;
-  try {
-    return await getCachedOrFetch(
-      getCacheKey("service", id),
-      async () => {
+  return getCachedOrFetch(
+    getCacheKey("service", id),
+    async () => {
+      try {
         const res = await api.get(`services/${id}`, {
           timeoutMs: Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 5000,
         });
@@ -552,12 +552,15 @@ export async function getServiceById(id, options = {}) {
               createdAt: s.createdAt ? new Date(s.createdAt) : null,
             }
           : null;
-      },
-      options
-    );
-  } catch {
-    return null;
-  }
+      } catch (error) {
+        if (error?.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    options
+  );
 }
 
 export async function createService(providerId, data) {

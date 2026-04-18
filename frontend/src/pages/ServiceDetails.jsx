@@ -5,7 +5,7 @@ import { formatStars, getAverageRatingAndCount } from "../utils/rating";
 import { getServiceMedia } from "../utils/serviceMedia";
 import { formatLrdPrice } from "../utils/currency";
 import { getLiveProviderPhoto, getServiceProviderId } from "../utils/providerProfile";
-import { preloadBookingRoute } from "../utils/routePreload";
+import { preloadBookingRoute, preloadServiceListingRoute } from "../utils/routePreload";
 import WhatsAppIcon from "../components/WhatsAppIcon";
 
 const ServiceDetails = () => {
@@ -26,6 +26,15 @@ const ServiceDetails = () => {
   const backTarget = state?.from === "user-dashboard" ? "/user" : "/services";
   const backLabel =
     state?.from === "user-dashboard" ? "Back to Dashboard" : "Back to Services";
+  const canUseHistoryBack = state?.from !== "user-dashboard" && typeof window !== "undefined" && window.history.length > 1;
+
+  const handleBack = () => {
+    if (canUseHistoryBack) {
+      navigate(-1);
+      return;
+    }
+    navigate(backTarget);
+  };
 
   const getReviewerName = (review) =>
     review?.userId?.name ||
@@ -142,6 +151,11 @@ const ServiceDetails = () => {
     setActiveMediaIndex(0);
   }, [id, service?._id]);
 
+  useEffect(() => {
+    if (state?.from === "user-dashboard") return;
+    preloadServiceListingRoute();
+  }, [state?.from]);
+
   if (isLoading) {
     return (
       <div className="service-details-page">
@@ -173,7 +187,7 @@ const ServiceDetails = () => {
       <div className="service-details-page">
         <div className="service-details-error-card">
           <p className="service-details-error-text">{error}</p>
-          <button className="service-details-btn" onClick={() => navigate(backTarget)}>
+          <button className="service-details-btn" onClick={handleBack}>
             {backLabel}
           </button>
         </div>
@@ -186,7 +200,7 @@ const ServiceDetails = () => {
       <div className="service-details-page">
         <div className="service-details-error-card">
           <p>Service not found.</p>
-          <button className="service-details-btn" onClick={() => navigate(backTarget)}>
+          <button className="service-details-btn" onClick={handleBack}>
             {backLabel}
           </button>
         </div>
@@ -217,7 +231,7 @@ const ServiceDetails = () => {
         <button
           type="button"
           className="service-details-back"
-          onClick={() => navigate(backTarget)}
+          onClick={handleBack}
         >
           ← {backLabel}
         </button>

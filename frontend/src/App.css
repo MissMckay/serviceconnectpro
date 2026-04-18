@@ -321,6 +321,13 @@
   color: var(--text-primary);
 }
 
+.topbar-user-menu-item:visited,
+.topbar-user-menu-item:active,
+.topbar-user-menu-item:focus-visible {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
 .topbar-user-menu-item-logout {
   color: var(--brand-red);
   font-weight: 600;
@@ -338,6 +345,12 @@
 .topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-item:hover {
   background: rgba(0, 40, 104, 0.08);
   color: var(--brand-blue-hover);
+}
+.topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-item:visited,
+.topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-item:active,
+.topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-item:focus-visible {
+  color: var(--brand-blue);
+  text-decoration: none;
 }
 .topbar-user-menu-protected .topbar-user-menu-dropdown .topbar-user-menu-name {
   color: var(--brand-blue);
@@ -2200,6 +2213,34 @@
   cursor: pointer;
   margin-right: 6px;
   margin-bottom: 4px;
+}
+
+.provider-table-btn-label,
+.provider-action-btn-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.provider-table-btn-label {
+  padding: 6px 9px;
+}
+
+.provider-action-btn-label {
+  padding: 7px 9px;
+}
+
+.provider-table-btn-label .dashboard-action-icon,
+.provider-action-btn-label .dashboard-action-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.provider-table-btn-label span,
+.provider-action-btn-label span {
+  line-height: 1;
 }
 
 .provider-table-btn-accept {

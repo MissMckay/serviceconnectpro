@@ -14,6 +14,7 @@ import {
   loadLoginPage,
   loadMessagesLayout,
   loadProviderDashboardPage,
+  loadResetPasswordPage,
   loadRegisterAdminPage,
   loadReviewPage,
   loadServiceDetailsPage,
@@ -25,6 +26,7 @@ import {
 const AuthPage = lazy(loadAuthPage);
 const Login = lazy(loadLoginPage);
 const ForgotPassword = lazy(loadForgotPasswordPage);
+const ResetPassword = lazy(loadResetPasswordPage);
 const RegisterAdmin = lazy(loadRegisterAdminPage);
 const AdminLoginPage = lazy(loadAdminLoginPage);
 const ServiceListing = lazy(loadServiceListingPage);
@@ -79,6 +81,7 @@ const AppRoutes = () => {
         <Route path="/admin-login" element={withSuspense(<AdminLoginPage />)} />
         <Route path="/admin/login" element={withSuspense(<AdminLoginPage />)} />
         <Route path="/forgot-password" element={withSuspense(<ForgotPassword />)} />
+        <Route path="/reset-password" element={withSuspense(<ResetPassword />)} />
         <Route path="/services" element={withSuspense(<ServiceListing />)} />
         <Route path="/services/:id" element={withSuspense(<ServiceDetails />)} />
 

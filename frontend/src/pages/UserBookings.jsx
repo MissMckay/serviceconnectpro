@@ -495,13 +495,13 @@ const UserBookings = () => {
                   <div className="booking-actions-end">
                     <button
                       style={actionButtonStyle}
-                      className="booking-card__action-btn dashboard-icon-btn"
+                      className="booking-card__action-btn"
                       onClick={() => cancelBooking(booking._id)}
                       disabled={cancellingId === booking._id || isLoading}
                       aria-label="Cancel booking"
                       title="Cancel booking"
                     >
-                      {cancellingId === booking._id ? "…" : <DashboardActionIcon name="cancel" />}
+                      {cancellingId === booking._id ? "Cancelling..." : "Cancel Booking"}
                     </button>
                   </div>
                 )}

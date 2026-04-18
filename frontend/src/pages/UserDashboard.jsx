@@ -412,6 +412,16 @@ const UserDashboard = () => {
     };
   }, [bookings, filteredServices.length]);
 
+  const openServicesOverview = () => {
+    setSelectedServiceId("");
+    navigate("/user", { replace: false });
+  };
+
+  const openBookingsOverview = () => {
+    setSelectedServiceId("");
+    navigate("/user?view=bookings", { replace: false });
+  };
+
   return (
     <div className="user-dashboard-content">
       <main className="dashboard-main-content">
@@ -420,22 +430,38 @@ const UserDashboard = () => {
             {!selectedService && (
               <>
                 <div className="admin-report-strip user-dashboard-metrics" style={{ marginBottom: "1.25rem" }}>
-                  <div className="admin-metric">
+                  <button
+                    type="button"
+                    className="admin-metric provider-metric provider-metric-button"
+                    onClick={openServicesOverview}
+                  >
                     <p>Available Services</p>
                     <strong>{dashboardStats.availableServices}</strong>
-                  </div>
-                  <div className="admin-metric">
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-metric provider-metric provider-metric-button"
+                    onClick={openBookingsOverview}
+                  >
                     <p>My Bookings</p>
                     <strong>{dashboardStats.totalBookings}</strong>
-                  </div>
-                  <div className="admin-metric">
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-metric provider-metric provider-metric-button"
+                    onClick={openBookingsOverview}
+                  >
                     <p>Pending</p>
                     <strong>{dashboardStats.pendingBookings}</strong>
-                  </div>
-                  <div className="admin-metric">
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-metric provider-metric provider-metric-button"
+                    onClick={openBookingsOverview}
+                  >
                     <p>Completed</p>
                     <strong>{dashboardStats.completedBookings}</strong>
-                  </div>
+                  </button>
                 </div>
 
                 <form className="dashboard-search" onSubmit={handleSearch}>

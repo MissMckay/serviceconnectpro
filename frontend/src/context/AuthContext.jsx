@@ -136,7 +136,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   const resetPassword = async (email) => {
-    throw new Error("Password reset is not implemented on the backend yet.");
+    const res = await API.post("/auth/forgot-password", { email });
+    return res?.data || res || {};
+  };
+
+  const completePasswordReset = async ({ token, password }) => {
+    const res = await API.post("/auth/reset-password", { token, password });
+    return res?.data || res || {};
   };
 
   const refreshProfile = async () => {
@@ -160,6 +166,7 @@ export const AuthProvider = ({ children }) => {
         registerAdmin,
         logout,
         resetPassword,
+        completePasswordReset,
         refreshProfile,
       }}
     >
