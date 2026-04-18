@@ -28,6 +28,8 @@ const userSchema = new mongoose.Schema(
     },
     providerAddress: { type: String, default: "Not provided" },
     profilePhoto: { type: String, default: "" },
+    passwordResetToken: { type: String, default: "" },
+    passwordResetExpiresAt: { type: Date, default: null },
   },
   { timestamps: true, _id: true, collection: "users" }
 );
@@ -37,6 +39,8 @@ userSchema.set("toJSON", {
     ret.id = ret._id;
     ret.uid = ret._id;
     if (ret.password !== undefined) delete ret.password;
+    if (ret.passwordResetToken !== undefined) delete ret.passwordResetToken;
+    if (ret.passwordResetExpiresAt !== undefined) delete ret.passwordResetExpiresAt;
     return ret;
   },
 });

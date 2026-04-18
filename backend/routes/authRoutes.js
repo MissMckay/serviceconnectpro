@@ -2,12 +2,38 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/User");
 const AdminInviteCode = require("../models/AdminInviteCode");
 const { getUserById } = require("../controllers/userLookupController");
 const connectDB = require("../config/db");
 
 const router = express.Router();
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+
+const getFrontendBaseUrl = (req) => {
+  const configuredBase =
+    process.env.FRONTEND_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.PUBLIC_APP_URL ||
+    "";
+
+  if (configuredBase.trim()) {
+    return configuredBase.trim().replace(/\/$/, "");
+  }
+
+  const originHeader = typeof req.get === "function" ? req.get("origin") : "";
+  if (originHeader && /^https?:\/\//i.test(originHeader)) {
+    return originHeader.replace(/\/$/, "");
+  }
+
+  return "http://localhost:5173";
+};
+
+const buildPasswordResetUrl = (req, token) =>
+  `${getFrontendBaseUrl(req)}/reset-password?token=${encodeURIComponent(token)}`;
+
+const createPasswordResetToken = () => crypto.randomBytes(32).toString("hex");
 
 const handleRouteError = (res, error) => {
   if (connectDB.isMongoConnectionError(error)) {
@@ -217,6 +243,85 @@ router.post("/login", async (req, res) => {
       }
     });
 
+  } catch (error) {
+    handleRouteError(res, error);
+  }
+});
+
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const normalizedEmail = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail })
+      .select("_id email accountStatus")
+      .maxTimeMS(4000);
+
+    if (!user || user.accountStatus === "suspended") {
+      return res.json({
+        message: "If this email exists, a password reset link has been generated.",
+      });
+    }
+
+    const resetToken = createPasswordResetToken();
+    user.passwordResetToken = await bcrypt.hash(resetToken, 10);
+    user.passwordResetExpiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+    await user.save();
+
+    const resetUrl = buildPasswordResetUrl(req, resetToken);
+
+    return res.json({
+      message: "If this email exists, a password reset link has been generated.",
+      resetUrl,
+      expiresInMinutes: Math.round(PASSWORD_RESET_TTL_MS / 60000),
+    });
+  } catch (error) {
+    handleRouteError(res, error);
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  try {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+    if (!token || !password) {
+      return res.status(400).json({ message: "Reset token and new password are required" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters long" });
+    }
+
+    const candidateUsers = await User.find({
+      passwordResetToken: { $ne: "" },
+      passwordResetExpiresAt: { $gt: new Date() },
+    })
+      .select("_id password passwordResetToken passwordResetExpiresAt")
+      .maxTimeMS(4000);
+
+    let matchedUser = null;
+    for (const candidate of candidateUsers) {
+      const isMatch = await bcrypt.compare(token, candidate.passwordResetToken || "");
+      if (isMatch) {
+        matchedUser = candidate;
+        break;
+      }
+    }
+
+    if (!matchedUser) {
+      return res.status(400).json({ message: "Reset link is invalid or has expired" });
+    }
+
+    matchedUser.password = await bcrypt.hash(password, 10);
+    matchedUser.passwordResetToken = "";
+    matchedUser.passwordResetExpiresAt = null;
+    await matchedUser.save();
+
+    return res.json({ message: "Password reset successful. Please log in with your new password." });
   } catch (error) {
     handleRouteError(res, error);
   }
