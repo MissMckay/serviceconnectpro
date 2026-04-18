@@ -35,8 +35,6 @@ const getDashboardPath = (role) => {
 };
 
 const getLogoutPath = (role) => {
-  const r = String(role || "").toLowerCase();
-  if (r === "admin") return "/admin-login";
   return "/login";
 };
 

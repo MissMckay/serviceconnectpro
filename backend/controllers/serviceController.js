@@ -351,6 +351,59 @@ const archiveServicesByProvider = async (providerId, removedBy = null) => {
   return Number(result?.modifiedCount || result?.nModified || 0);
 };
 
+const getMissingProviderIds = async (services = [], timeoutMs = 600) => {
+  const providerIds = [
+    ...new Set(
+      services
+        .map((service) => String(service?.providerId || "").trim())
+        .filter((providerId) => providerId && mongoose.Types.ObjectId.isValid(providerId))
+    ),
+  ];
+
+  if (!providerIds.length) {
+    return [];
+  }
+
+  try {
+    const providers = await withTimeout(
+      User.find({ _id: { $in: providerIds } })
+        .select("_id")
+        .maxTimeMS(Math.max(250, timeoutMs))
+        .lean(),
+      timeoutMs,
+      `Provider existence lookup exceeded ${timeoutMs}ms`
+    );
+
+    const existingProviderIds = new Set(providers.map((provider) => String(provider._id)));
+    return providerIds.filter((providerId) => !existingProviderIds.has(providerId));
+  } catch (_) {
+    return [];
+  }
+};
+
+const archiveServicesByProviders = async (providerIds = [], removedBy = null) => {
+  const uniqueProviderIds = [...new Set(providerIds.map((providerId) => String(providerId || "").trim()).filter(Boolean))];
+  if (!uniqueProviderIds.length) return 0;
+
+  const result = await Service.updateMany(
+    {
+      providerId: { $in: uniqueProviderIds },
+      moderationStatus: { $ne: "removed" },
+    },
+    {
+      $set: {
+        availabilityStatus: "Unavailable",
+        moderationStatus: "removed",
+        removedAt: new Date(),
+        removedBy: removedBy ? String(removedBy) : null,
+      },
+    }
+  );
+
+  clearServicesListCache();
+  return Number(result?.modifiedCount || result?.nModified || 0);
+};
+
 const getCacheEntry = (cacheKey) => {
   const cached = listCache.get(cacheKey);
   if (!cached) return null;
@@ -492,7 +545,14 @@ const fetchServicesPage = async ({
   );
 
   const hasMore = rawServices.length > limit;
-  const list = rawServices.slice(0, limit);
+  let list = rawServices.slice(0, limit);
+
+  const missingProviderIds = await getMissingProviderIds(list, Math.min(timeoutMs, 600));
+  if (missingProviderIds.length) {
+    const missingSet = new Set(missingProviderIds);
+    list = list.filter((service) => !missingSet.has(String(service?.providerId || "").trim()));
+    void archiveServicesByProviders(missingProviderIds, "system-orphaned-provider");
+  }
 
   const services = await normalizeServiceCardPayload(list, Math.min(timeoutMs, 600));
 
@@ -555,6 +615,11 @@ const fetchServiceDetail = async (id, timeoutMs = 4000) =>
     `Service detail query exceeded ${timeoutMs}ms`
   ).then(async (service) => {
     if (!service) return service;
+    const missingProviderIds = await getMissingProviderIds([service], Math.min(timeoutMs, 600));
+    if (missingProviderIds.length) {
+      void archiveServicesByProviders(missingProviderIds, "system-orphaned-provider");
+      return null;
+    }
     const [normalized] = await normalizeServiceCardPayload([service], Math.min(timeoutMs, 600));
     return normalized;
   });

@@ -3,7 +3,7 @@ import api from "./client";
 const POLL_MS = 10000;
 const CACHE_TTL_MS = 15000;
 const PUBLIC_SERVICES_STORAGE_KEY = "serviceconnect:public-services-cache";
-const PUBLIC_SERVICES_STORAGE_TTL_MS = 5 * 60 * 1000;
+const PUBLIC_SERVICES_STORAGE_TTL_MS = 6 * 60 * 60 * 1000;
 const PUBLIC_SERVICES_TIMEOUT_MS = 12000;
 const MAX_SERVICE_IMAGE_COUNT = 7;
 const MAX_PROVIDER_AVATAR_BYTES = 80 * 1024;
