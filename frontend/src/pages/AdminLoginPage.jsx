@@ -4,6 +4,7 @@ import { AuthContext } from "../context/AuthContext";
 import AuthField from "../components/auth/AuthField";
 import AuthInput from "../components/auth/AuthInput";
 import AuthPasswordInput from "../components/auth/AuthPasswordInput";
+import { clearStoredAuthData } from "../utils/storedAuth";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -21,9 +22,7 @@ export default function AdminLoginPage() {
       const user = await login({ email: email.trim(), password });
       const role = String(user?.role || "").toLowerCase();
       if (role !== "admin") {
-        sessionStorage.removeItem("token");
-        sessionStorage.removeItem("user");
-        sessionStorage.removeItem("role");
+        clearStoredAuthData();
         setError("Only administrators can sign in here. Use the regular Login for other accounts.");
         setSubmitting(false);
         return;

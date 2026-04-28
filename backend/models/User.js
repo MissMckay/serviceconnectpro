@@ -30,6 +30,8 @@ const userSchema = new mongoose.Schema(
     profilePhoto: { type: String, default: "" },
     passwordResetToken: { type: String, default: "" },
     passwordResetExpiresAt: { type: Date, default: null },
+    loginOtpCode: { type: String, default: "" },
+    loginOtpExpiresAt: { type: Date, default: null },
   },
   { timestamps: true, _id: true, collection: "users" }
 );
@@ -41,10 +43,13 @@ userSchema.set("toJSON", {
     if (ret.password !== undefined) delete ret.password;
     if (ret.passwordResetToken !== undefined) delete ret.passwordResetToken;
     if (ret.passwordResetExpiresAt !== undefined) delete ret.passwordResetExpiresAt;
+    if (ret.loginOtpCode !== undefined) delete ret.loginOtpCode;
+    if (ret.loginOtpExpiresAt !== undefined) delete ret.loginOtpExpiresAt;
     return ret;
   },
 });
 
 userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
 
 module.exports = mongoose.model("User", userSchema);

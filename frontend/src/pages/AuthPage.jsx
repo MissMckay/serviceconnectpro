@@ -13,8 +13,9 @@ const AuthPage = () => {
 
   const [view, setView] = useState(isRegister ? "register" : "login");
 
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [loginRememberMe, setLoginRememberMe] = useState(true);
   const [loginError, setLoginError] = useState("");
 
   const [registerForm, setRegisterForm] = useState({
@@ -53,7 +54,11 @@ const AuthPage = () => {
     e.preventDefault();
     setLoginError("");
     try {
-      const loggedInUser = await login({ email: loginEmail, password: loginPassword });
+      const loggedInUser = await login({
+        identifier: loginIdentifier,
+        password: loginPassword,
+        rememberMe: loginRememberMe,
+      });
       const role = String(loggedInUser?.role || "user").toLowerCase();
       if (role === "admin") navigate("/admin", { replace: true });
       else if (role === "provider") navigate("/provider", { replace: true });
@@ -134,15 +139,15 @@ const AuthPage = () => {
             <h2 className="auth-heading">Welcome back</h2>
             <p className="auth-subheading">Sign in to your account</p>
             <form onSubmit={handleLogin} className="auth-form">
-              <AuthField id="auth-login-email" label="Email">
+              <AuthField id="auth-login-email" label="Phone Number or Email">
                 <AuthInput
                   id="auth-login-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
+                  type="text"
+                  placeholder="+231770000000 or you@example.com"
+                  value={loginIdentifier}
+                  onChange={(e) => setLoginIdentifier(e.target.value)}
                   required
-                  autoComplete="email"
+                  autoComplete="username"
                   rightIcon={
                     <svg viewBox="0 0 24 24" width="20" height="20">
                       <path d="M3 6h18v12H3z M3 7l9 6 9-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -161,6 +166,14 @@ const AuthPage = () => {
                   ariaLabel="Show password"
                 />
               </AuthField>
+              <label className="auth-remember-row">
+                <input
+                  type="checkbox"
+                  checked={loginRememberMe}
+                  onChange={(e) => setLoginRememberMe(e.target.checked)}
+                />
+                <span>Keep me signed in</span>
+              </label>
               <button type="submit" className="auth-btn auth-btn--primary">Sign in</button>
               <Link to="/forgot-password" className="auth-link">Forgot password?</Link>
             </form>

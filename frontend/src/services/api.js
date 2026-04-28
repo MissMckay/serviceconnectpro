@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getStoredToken } from "../utils/storedAuth";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
 const DEFAULT_GET_TIMEOUT_MS = Math.max(
@@ -22,17 +23,13 @@ const isPublicGetRequest = (config) => {
   );
 };
 
-async function getToken() {
-  return sessionStorage.getItem("token");
-}
-
 API.interceptors.request.use(async (req) => {
   const method = String(req?.method || "get").toLowerCase();
   if (method === "get" && !Number.isFinite(Number(req.timeout))) {
     req.timeout = DEFAULT_GET_TIMEOUT_MS;
   }
   if (isPublicGetRequest(req)) return req;
-  const token = await getToken();
+  const token = getStoredToken();
   if (token) req.headers.Authorization = `Bearer ${token}`;
   return req;
 });

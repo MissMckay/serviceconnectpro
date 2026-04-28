@@ -1,9 +1,10 @@
 import { io } from "socket.io-client";
+import { getStoredToken } from "../utils/storedAuth";
 
 let socket = null;
 
 export function getMessageSocket() {
-  const token = sessionStorage.getItem("token");
+  const token = getStoredToken();
   if (!token) return null;
   if (socket?.connected) return socket;
   const origin = window.location.origin;

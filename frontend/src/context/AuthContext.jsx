@@ -15,20 +15,55 @@ const defaultProfile = {
 const AUTH_PROFILE_TIMEOUT_MS = 5000;
 const AUTH_SESSION_VERSION_KEY = "serviceconnect_auth_session_version";
 const AUTH_SESSION_VERSION = "2";
+const AUTH_STORAGE_KEY = "token";
 
-const clearStoredAuth = () => {
-  sessionStorage.removeItem("token");
-  sessionStorage.removeItem("user");
-  sessionStorage.removeItem("role");
-  sessionStorage.removeItem(AUTH_SESSION_VERSION_KEY);
+const getAvailableStorages = () => {
+  const storages = [];
+  if (typeof window === "undefined") return storages;
+  if (typeof window.localStorage !== "undefined") storages.push(window.localStorage);
+  if (typeof window.sessionStorage !== "undefined") storages.push(window.sessionStorage);
+  return storages;
 };
 
-const storeToken = (token) => {
-  sessionStorage.removeItem("user");
-  sessionStorage.removeItem("role");
+const getStoredToken = () => {
+  for (const storage of getAvailableStorages()) {
+    const token = storage.getItem(AUTH_STORAGE_KEY);
+    if (token) {
+      return {
+        token,
+        version: storage.getItem(AUTH_SESSION_VERSION_KEY),
+        storage,
+      };
+    }
+  }
+  return { token: "", version: "", storage: null };
+};
+
+const clearStoredAuth = () => {
+  getAvailableStorages().forEach((storage) => {
+    storage.removeItem("token");
+    storage.removeItem("user");
+    storage.removeItem("role");
+    storage.removeItem(AUTH_SESSION_VERSION_KEY);
+  });
+};
+
+const storeToken = (token, rememberMe = false) => {
+  clearStoredAuth();
+  const targetStorage =
+    typeof window !== "undefined" && rememberMe && typeof window.localStorage !== "undefined"
+      ? window.localStorage
+      : typeof window !== "undefined" && typeof window.sessionStorage !== "undefined"
+        ? window.sessionStorage
+        : null;
+
+  if (!targetStorage) return;
+
+  targetStorage.removeItem("user");
+  targetStorage.removeItem("role");
   if (token) {
-    sessionStorage.setItem("token", token);
-    sessionStorage.setItem(AUTH_SESSION_VERSION_KEY, AUTH_SESSION_VERSION);
+    targetStorage.setItem("token", token);
+    targetStorage.setItem(AUTH_SESSION_VERSION_KEY, AUTH_SESSION_VERSION);
   }
 };
 
@@ -38,8 +73,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const load = async () => {
-      const token = sessionStorage.getItem("token");
-      const authSessionVersion = sessionStorage.getItem(AUTH_SESSION_VERSION_KEY);
+      const { token, version: authSessionVersion } = getStoredToken();
 
       if (token && authSessionVersion !== AUTH_SESSION_VERSION) {
         clearStoredAuth();
@@ -49,8 +83,6 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (!token) {
-        sessionStorage.removeItem("user");
-        sessionStorage.removeItem("role");
         setUser(null);
         setAuthReady(true);
         return;
@@ -76,12 +108,12 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (formData) => {
     const res = await API.post("/auth/login", {
-      email: formData.email,
+      identifier: formData.identifier || formData.email || formData.phone,
       password: formData.password,
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    storeToken(token);
+    storeToken(token, Boolean(formData.rememberMe));
     if (u) {
       const uid = u.id || u._id;
       const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
@@ -107,7 +139,7 @@ export const AuthProvider = ({ children }) => {
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    storeToken(token);
+    storeToken(token, Boolean(formData.rememberMe));
     const uid = u?.id || u?._id;
     const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
     setUser(merged);
@@ -123,7 +155,7 @@ export const AuthProvider = ({ children }) => {
     });
     const token = res?.data?.token || res?.token;
     const u = res?.data?.user || res?.user;
-    storeToken(token);
+    storeToken(token, Boolean(formData.rememberMe));
     const uid = u?.id || u?._id;
     const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
     setUser(merged);
@@ -138,6 +170,25 @@ export const AuthProvider = ({ children }) => {
   const resetPassword = async (email) => {
     const res = await API.post("/auth/forgot-password", { email });
     return res?.data || res || {};
+  };
+
+  const requestLoginOtp = async ({ identifier }) => {
+    const res = await API.post("/auth/request-login-otp", { identifier });
+    return res?.data || res || {};
+  };
+
+  const verifyLoginOtp = async ({ identifier, otp, rememberMe }) => {
+    const res = await API.post("/auth/verify-login-otp", { identifier, otp });
+    const token = res?.data?.token || res?.token;
+    const u = res?.data?.user || res?.user;
+    storeToken(token, Boolean(rememberMe));
+    if (u) {
+      const uid = u.id || u._id;
+      const merged = { ...defaultProfile, ...u, uid, id: uid, _id: uid };
+      setUser(merged);
+      return merged;
+    }
+    return null;
   };
 
   const completePasswordReset = async ({ token, password }) => {
@@ -166,6 +217,8 @@ export const AuthProvider = ({ children }) => {
         registerAdmin,
         logout,
         resetPassword,
+        requestLoginOtp,
+        verifyLoginOtp,
         completePasswordReset,
         refreshProfile,
       }}
